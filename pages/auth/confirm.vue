@@ -8,104 +8,114 @@ const route = useRoute();
 const user = useSupabaseUser();
 const cookieName = useRuntimeConfig().public.supabase.cookieName;
 const isLoading = ref(true);
-const errorMessage = ref<string | null>(null);
+const errorMessage = ref(null);
 
 // Function to exchange the OAuth code for a session
 const exchangeCodeForSession = async () => {
-  const code = route.query.code as string;
+  // Get the code from the URL query parameters
+  const code = route.query.code;
 
   if (!code) {
-    console.error('❌ No code found in URL');
-    errorMessage.value = 'No authentication code found';
+    console.error("❌ No code found in URL");
+    errorMessage.value = "No authentication code found";
     isLoading.value = false;
-    return navigateTo('/?error=no_code');
+    return navigateTo("/?error=no_code");
   }
 
   try {
-    console.log('🔄 Exchanging code for session...');
+    console.log("🔄 Exchanging code for session...");
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (error) {
-      console.error('❌ Error exchanging code:', error);
+      console.error("❌ Error exchanging code:", error);
       errorMessage.value = error.message;
       isLoading.value = false;
-      return navigateTo('/?error=auth');
+      return navigateTo("/?error=auth");
     }
 
     if (data?.session) {
-      console.log('✅ Session established successfully');
+      console.log("✅ Session established successfully");
 
       // Store tokens if needed
       if (data.session.provider_token) {
-        window.localStorage.setItem("oauth_provider_token", data.session.provider_token);
+        window.localStorage.setItem(
+          "oauth_provider_token",
+          data.session.provider_token,
+        );
       }
       if (data.session.provider_refresh_token) {
-        window.localStorage.setItem("oauth_provider_refresh_token", data.session.provider_refresh_token);
+        window.localStorage.setItem(
+          "oauth_provider_refresh_token",
+          data.session.provider_refresh_token,
+        );
       }
 
       // Wait a moment for Supabase to fully process the session
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       // Now check role and redirect
       await checkRoleAndRedirect();
     } else {
-      console.error('❌ No session after code exchange');
-      errorMessage.value = 'No session established';
+      console.error("❌ No session after code exchange");
+      errorMessage.value = "No session established";
       isLoading.value = false;
-      return navigateTo('/?error=no_session');
+      return navigateTo("/?error=no_session");
     }
   } catch (err) {
-    console.error('❌ Unexpected error:', err);
-    errorMessage.value = err instanceof Error ? err.message : 'Unexpected error';
+    console.error("❌ Unexpected error:", err);
+    errorMessage.value = err.message || "Unexpected error";
     isLoading.value = false;
-    return navigateTo('/?error=unexpected');
+    return navigateTo("/?error=unexpected");
   }
 };
 
 // Function to check role and redirect
 const checkRoleAndRedirect = async () => {
   try {
-    console.log('👤 Checking user role...');
-    const response = await $fetch('/api/auth/ensure-profile', {
-      method: 'POST'
+    console.log("👤 Checking user role...");
+    const response = await $fetch("/api/auth/ensure-profile", {
+      method: "POST",
     });
 
-    console.log('📡 API response:', response);
+    console.log("📡 API response:", response);
 
     if (response?.success) {
       useCookie(`${cookieName}-redirect-path`).value = null;
       isLoading.value = false;
 
-      if (response.role === 'admin') {
-        console.log('👑 Redirecting to admin dashboard');
+      if (response.role === "admin") {
+        console.log("👑 Redirecting to admin dashboard");
         return navigateTo("/admin/dashboard");
       } else {
-        console.log('🎓 Redirecting to student dashboard');
+        console.log("🎓 Redirecting to student dashboard");
         return navigateTo("/students/dashboard");
       }
     } else {
-      console.error('❌ Role check failed:', response?.error);
-      errorMessage.value = response?.error || 'Role check failed';
+      console.error("❌ Role check failed:", response?.error);
+      errorMessage.value = response?.error || "Role check failed";
       isLoading.value = false;
-      return navigateTo('/?error=role_check');
+      return navigateTo("/?error=role_check");
     }
   } catch (apiError) {
-    console.error('❌ API error:', apiError);
-    errorMessage.value = apiError instanceof Error ? apiError.message : 'API error';
+    console.error("❌ API error:", apiError);
+    errorMessage.value = apiError.message || "API error";
     isLoading.value = false;
-    return navigateTo('/?error=api');
+    return navigateTo("/?error=api");
   }
 };
 
 // Listen for auth state changes as a fallback
 supabase.auth.onAuthStateChange((event, session) => {
-  console.log('🔔 Auth state changed:', event);
+  console.log("🔔 Auth state changed:", event);
 
   if (session && session.provider_token) {
     window.localStorage.setItem("oauth_provider_token", session.provider_token);
   }
   if (session && session.provider_refresh_token) {
-    window.localStorage.setItem("oauth_provider_refresh_token", session.provider_refresh_token);
+    window.localStorage.setItem(
+      "oauth_provider_refresh_token",
+      session.provider_refresh_token,
+    );
   }
   if (event === "SIGNED_OUT") {
     window.localStorage.removeItem("oauth_provider_token");
@@ -114,7 +124,7 @@ supabase.auth.onAuthStateChange((event, session) => {
 
   // If we get a SIGNED_IN event but we're still loading, try to redirect
   if (event === "SIGNED_IN" && isLoading.value) {
-    console.log('🔔 Received SIGNED_IN event, redirecting...');
+    console.log("🔔 Received SIGNED_IN event, redirecting...");
     checkRoleAndRedirect();
   }
 });
@@ -124,11 +134,11 @@ watch(
   user,
   async (newUser) => {
     if (newUser && isLoading.value) {
-      console.log('👤 User detected via watch, redirecting...');
+      console.log("👤 User detected via watch, redirecting...");
       await checkRoleAndRedirect();
     }
   },
-  { immediate: true }
+  { immediate: true },
 );
 
 // Run the code exchange when the page loads
