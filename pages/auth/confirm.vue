@@ -1,54 +1,126 @@
 <script setup>
-  definePageMeta({
-    layout: false,
-  });
+definePageMeta({
+  layout: false,
+});
 
-  const supabase = useSupabaseClient();
-  const user = useSupabaseUser();
-  const cookieName = useRuntimeConfig().public.supabase.cookieName;
+const supabase = useSupabaseClient();
+const route = useRoute();
+const user = useSupabaseUser();
+const cookieName = useRuntimeConfig().public.supabase.cookieName;
+const isLoading = ref(true);
 
-  supabase.auth.onAuthStateChange((event, session) => {
-    if (session && session.provider_token) {
-      window.localStorage.setItem("oauth_provider_token", session.provider_token);
+// Function to exchange the OAuth code for a session
+const exchangeCodeForSession = async () => {
+  const code = route.query.code as string;
+
+  if (!code) {
+    console.error('❌ No code found in URL');
+    isLoading.value = false;
+    return navigateTo('/?error=no_code');
+  }
+
+  try {
+    console.log('🔄 Exchanging code for session...');
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+    if (error) {
+      console.error('❌ Error exchanging code:', error);
+      isLoading.value = false;
+      return navigateTo('/?error=auth');
     }
-    if (session && session.provider_refresh_token) {
-      window.localStorage.setItem("oauth_provider_refresh_token", session.provider_refresh_token);
-    }
-    if (event === "SIGNED_OUT") {
-      window.localStorage.removeItem("oauth_provider_token");
-      window.localStorage.removeItem("oauth_provider_refresh_token");
-    }
-  });
 
-  watch(
-    user,
-    async () => {
-      if (user.value) {
-        try {
-          // Check user role (admin table determines if user is admin)
-          const response = await $fetch('/api/auth/ensure-profile', {
-            method: 'POST'
-          });
+    if (data?.session) {
+      console.log('✅ Session established successfully');
 
-          if (!response.success) {
-            return navigateTo('/?error=auth');
-          }
+      // Store tokens if needed
+      if (data.session.provider_token) {
+        window.localStorage.setItem("oauth_provider_token", data.session.provider_token);
+      }
+      if (data.session.provider_refresh_token) {
+        window.localStorage.setItem("oauth_provider_refresh_token", data.session.provider_refresh_token);
+      }
 
+      // Now check role and redirect
+      try {
+        const response = await $fetch('/api/auth/ensure-profile', {
+          method: 'POST'
+        });
+
+        if (response?.success) {
           useCookie(`${cookieName}-redirect-path`).value = null;
 
-          // Redirect based on role (admin or student)
           if (response.role === 'admin') {
             return navigateTo("/admin/dashboard");
           } else {
             return navigateTo("/students/dashboard");
           }
-        } catch (err) {
-          return navigateTo('/?error=auth');
+        } else {
+          console.error('❌ Role check failed:', response?.error);
+          return navigateTo('/?error=role_check');
         }
+      } catch (apiError) {
+        console.error('❌ API error:', apiError);
+        return navigateTo('/?error=api');
       }
-    },
-    { immediate: true }
-  );
+    } else {
+      console.error('❌ No session after code exchange');
+      isLoading.value = false;
+      return navigateTo('/?error=no_session');
+    }
+  } catch (err) {
+    console.error('❌ Unexpected error:', err);
+    isLoading.value = false;
+    return navigateTo('/?error=unexpected');
+  }
+};
+
+// Also listen for auth state changes as a fallback
+supabase.auth.onAuthStateChange((event, session) => {
+  console.log('🔔 Auth state changed:', event);
+
+  if (session && session.provider_token) {
+    window.localStorage.setItem("oauth_provider_token", session.provider_token);
+  }
+  if (session && session.provider_refresh_token) {
+    window.localStorage.setItem("oauth_provider_refresh_token", session.provider_refresh_token);
+  }
+  if (event === "SIGNED_OUT") {
+    window.localStorage.removeItem("oauth_provider_token");
+    window.localStorage.removeItem("oauth_provider_refresh_token");
+  }
+});
+
+// Watch for user state changes as a fallback
+watch(
+  user,
+  async (newUser) => {
+    if (newUser) {
+      console.log('👤 User detected via watch, redirecting...');
+      try {
+        const response = await $fetch('/api/auth/ensure-profile', {
+          method: 'POST'
+        });
+
+        if (response?.success) {
+          useCookie(`${cookieName}-redirect-path`).value = null;
+          if (response.role === 'admin') {
+            return navigateTo("/admin/dashboard");
+          } else {
+            return navigateTo("/students/dashboard");
+          }
+        }
+      } catch (err) {
+        console.error('❌ API error in watch:', err);
+      }
+    }
+  },
+  { immediate: true }
+);
+
+// Run the code exchange when the page loads
+onMounted(() => {
+  exchangeCodeForSession();
+});
 </script>
 
 <template>
@@ -71,6 +143,7 @@
         />
       </svg>
       <span class="sr-only">Loading...</span>
+      <p class="mt-4 text-gray-500">Authenticating...</p>
     </div>
   </div>
 </template>
