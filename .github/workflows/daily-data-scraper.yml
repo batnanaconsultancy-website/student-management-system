@@ -1,11 +1,8 @@
 name: Daily Data Scraper
 
 on:
-  # Run daily at 6 AM UTC
   schedule:
     - cron: "0 6 * * *"
-
-  # Allow manual triggering
   workflow_dispatch:
     inputs:
       scrape_mode:
@@ -26,6 +23,7 @@ on:
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
+    environment: Production # <-- ADD THIS - uses your Production environment secrets
 
     steps:
       - name: Checkout repository
@@ -44,7 +42,6 @@ jobs:
 
       - name: Create .env file
         run: |
-          # Create .env in scripts directory
           cat << EOF > scripts/.env
           SUPABASE_URL=${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
@@ -52,76 +49,25 @@ jobs:
           SCRAPER_USERNAME=${{ secrets.SCRAPER_USERNAME }}
           SCRAPER_PASSWORD=${{ secrets.SCRAPER_PASSWORD }}
           EOF
-
-          # Also create in root directory
           cp scripts/.env .env || true
-
-          # Show that .env was created (masked)
           echo "✅ .env file created successfully"
+          echo "Checking .env content (masked):"
+          cat scripts/.env | sed 's/=.*/=***/g'
 
       - name: Create Google credentials file
         run: |
           echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google-credentials.json
-          # Also copy to scripts directory
           cp google-credentials.json scripts/ || true
           echo "✅ Google credentials created"
 
-      - name: Debug - Check environment and files
+      - name: Debug - Verify secrets are set
         run: |
-          echo "=== DEBUGGING INFORMATION ==="
-          echo "Current directory: $(pwd)"
-          echo ""
-          echo "=== Checking .env files ==="
-          if [ -f scripts/.env ]; then
-            echo "✅ scripts/.env exists"
-            echo "Content (masked):"
-            cat scripts/.env | sed 's/=.*/=***/g'
-          else
-            echo "❌ scripts/.env does NOT exist"
-          fi
-
-          if [ -f .env ]; then
-            echo "✅ .env exists in root"
-          else
-            echo "❌ .env does NOT exist in root"
-          fi
-          echo ""
-          echo "=== Checking Google credentials ==="
-          if [ -f google-credentials.json ]; then
-            echo "✅ google-credentials.json exists"
-          else
-            echo "❌ google-credentials.json does NOT exist"
-          fi
-
-          if [ -f scripts/google-credentials.json ]; then
-            echo "✅ scripts/google-credentials.json exists"
-          else
-            echo "❌ scripts/google-credentials.json does NOT exist"
-          fi
-          echo ""
-          echo "=== Environment Variables (masked) ==="
+          echo "=== Checking if secrets are being passed ==="
           echo "SUPABASE_URL: ${SUPABASE_URL:+✅ SET}"
           echo "SUPABASE_KEY: ${SUPABASE_KEY:+✅ SET}"
           echo "SUPABASE_ROLE_KEY: ${SUPABASE_ROLE_KEY:+✅ SET}"
           echo "SCRAPER_USERNAME: ${SCRAPER_USERNAME:+✅ SET}"
           echo "SCRAPER_PASSWORD: ${SCRAPER_PASSWORD:+✅ SET}"
-          echo ""
-
-      - name: Debug - Test Python .env loading
-        working-directory: ./scripts
-        run: |
-          echo "=== Testing Python .env loading ==="
-          python -c "
-          import os
-          from dotenv import load_dotenv
-          from pathlib import Path
-
-          # Try loading from current directory
-          load_dotenv()
-          print('SUPABASE_URL from .env:', os.getenv('SUPABASE_URL', 'NOT FOUND'))
-          print('SUPABASE_KEY from .env:', os.getenv('SUPABASE_KEY', 'NOT FOUND')[:20] + '...' if os.getenv('SUPABASE_KEY') else 'NOT FOUND')
-          print('SCRAPER_USERNAME from .env:', os.getenv('SCRAPER_USERNAME', 'NOT FOUND'))
-          "
 
       - name: Run data scraper (Manual - Full)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.scrape_mode == 'full'
