@@ -1,8 +1,11 @@
 name: Daily Data Scraper
 
 on:
+  # Run daily at 6 AM UTC
   schedule:
     - cron: "0 6 * * *"
+
+  # Allow manual triggering
   workflow_dispatch:
     inputs:
       scrape_mode:
@@ -23,7 +26,6 @@ on:
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
-    environment: Production # <-- ADD THIS - uses your Production environment secrets
 
     steps:
       - name: Checkout repository
@@ -49,35 +51,21 @@ jobs:
           SCRAPER_USERNAME=${{ secrets.SCRAPER_USERNAME }}
           SCRAPER_PASSWORD=${{ secrets.SCRAPER_PASSWORD }}
           EOF
-          cp scripts/.env .env || true
-          echo "✅ .env file created successfully"
-          echo "Checking .env content (masked):"
-          cat scripts/.env | sed 's/=.*/=***/g'
 
       - name: Create Google credentials file
         run: |
           echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google-credentials.json
-          cp google-credentials.json scripts/ || true
-          echo "✅ Google credentials created"
 
-      - name: Debug - Verify secrets are set
+      - name: Run data scraper (Scheduled - Full Pipeline)
+        if: github.event_name == 'schedule'
+        working-directory: ./scripts
         run: |
-          echo "=== Checking if secrets are being passed ==="
-          echo "SUPABASE_URL: ${SUPABASE_URL:+✅ SET}"
-          echo "SUPABASE_KEY: ${SUPABASE_KEY:+✅ SET}"
-          echo "SUPABASE_ROLE_KEY: ${SUPABASE_ROLE_KEY:+✅ SET}"
-          echo "SCRAPER_USERNAME: ${SCRAPER_USERNAME:+✅ SET}"
-          echo "SCRAPER_PASSWORD: ${SCRAPER_PASSWORD:+✅ SET}"
+          echo "Running scheduled daily scraping..."
+          python main.py --full --scrape
 
       - name: Run data scraper (Manual - Full)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.scrape_mode == 'full'
         working-directory: ./scripts
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SUPABASE_ROLE_KEY: ${{ secrets.SUPABASE_ROLE_KEY }}
-          SCRAPER_USERNAME: ${{ secrets.SCRAPER_USERNAME }}
-          SCRAPER_PASSWORD: ${{ secrets.SCRAPER_PASSWORD }}
         run: |
           if [ "${{ github.event.inputs.enable_scraping }}" == "true" ]; then
             echo "Running full pipeline with web scraping..."
@@ -90,12 +78,6 @@ jobs:
       - name: Run data scraper (Manual - Quick)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.scrape_mode == 'quick'
         working-directory: ./scripts
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SUPABASE_ROLE_KEY: ${{ secrets.SUPABASE_ROLE_KEY }}
-          SCRAPER_USERNAME: ${{ secrets.SCRAPER_USERNAME }}
-          SCRAPER_PASSWORD: ${{ secrets.SCRAPER_PASSWORD }}
         run: |
           echo "Running quick update (management + analytics only)..."
           python main.py --quick
@@ -103,12 +85,6 @@ jobs:
       - name: Run data scraper (Manual - Data Only)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.scrape_mode == 'data-only'
         working-directory: ./scripts
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SUPABASE_ROLE_KEY: ${{ secrets.SUPABASE_ROLE_KEY }}
-          SCRAPER_USERNAME: ${{ secrets.SCRAPER_USERNAME }}
-          SCRAPER_PASSWORD: ${{ secrets.SCRAPER_PASSWORD }}
         run: |
           if [ "${{ github.event.inputs.enable_scraping }}" == "true" ]; then
             echo "Running data processing with web scraping..."
@@ -120,26 +96,9 @@ jobs:
 
       - name: Sync attendance from Google Sheets
         working-directory: ./scripts
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SUPABASE_ROLE_KEY: ${{ secrets.SUPABASE_ROLE_KEY }}
         run: |
           echo "📊 Syncing attendance data from Google Sheets..."
           python main.py --attendance || echo "⚠️ Attendance sync failed (non-fatal)"
-
-      - name: Run data scraper (Scheduled - Full Pipeline)
-        if: github.event_name == 'schedule'
-        working-directory: ./scripts
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          SUPABASE_ROLE_KEY: ${{ secrets.SUPABASE_ROLE_KEY }}
-          SCRAPER_USERNAME: ${{ secrets.SCRAPER_USERNAME }}
-          SCRAPER_PASSWORD: ${{ secrets.SCRAPER_PASSWORD }}
-        run: |
-          echo "Running scheduled daily scraping..."
-          python main.py --full --scrape
 
       - name: Commit and push updated data
         if: success()
@@ -157,11 +116,9 @@ jobs:
 
       - name: Check for student status changes and send notifications
         if: success()
-        env:
-          APP_URL: ${{ secrets.APP_URL }}
         run: |
           echo "🔍 Checking for student status changes..."
-          RESPONSE=$(curl -s -X POST $APP_URL/api/notifications/monitor-status \
+          RESPONSE=$(curl -s -X POST ${{ secrets.APP_URL }}/api/notifications/monitor-status \
             -H "Content-Type: application/json" \
             -w "\nHTTP_STATUS:%{http_code}")
 
@@ -174,15 +131,14 @@ jobs:
           else
             echo "⚠️ Status monitoring failed with HTTP $HTTP_STATUS"
             echo "$BODY"
+            # Don't fail the entire workflow, just log the error
           fi
 
       - name: Clean up sensitive files
         if: always()
         run: |
           rm -f scripts/.env
-          rm -f .env
           rm -f google-credentials.json
-          rm -f scripts/google-credentials.json
 
       - name: Upload logs (on failure)
         if: failure()
