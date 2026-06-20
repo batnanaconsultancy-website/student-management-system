@@ -1,11 +1,8 @@
 name: Daily Data Scraper
 
 on:
-  # Run daily at 6 AM UTC
   schedule:
     - cron: "0 6 * * *"
-
-  # Allow manual triggering
   workflow_dispatch:
     inputs:
       scrape_mode:
@@ -26,6 +23,7 @@ on:
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
+    environment: SUPABASE_URL # <-- ADD THIS - references your environment
 
     steps:
       - name: Checkout repository
@@ -44,7 +42,6 @@ jobs:
 
       - name: Create .env file
         run: |
-          # Create .env in scripts directory
           cat << EOF > scripts/.env
           SUPABASE_URL=${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
@@ -52,17 +49,12 @@ jobs:
           SCRAPER_USERNAME=${{ secrets.SCRAPER_USERNAME }}
           SCRAPER_PASSWORD=${{ secrets.SCRAPER_PASSWORD }}
           EOF
-
-          # Also create in root
           cp scripts/.env .env || true
-
-          # Show that .env was created
           echo "✅ .env file created successfully"
 
       - name: Create Google credentials file
         run: |
           echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google-credentials.json
-          # Also copy to scripts directory
           cp google-credentials.json scripts/ || true
           echo "✅ Google credentials created"
 
