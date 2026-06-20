@@ -39,9 +39,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install supabase python-dotenv requests beautifulsoup4 gspread google-auth
 
-      - name: Create .env file
+      - name: Create .env file (fallback)
         run: |
-          # Create .env in scripts directory
           cat << EOF > scripts/.env
           SUPABASE_URL=${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY=${{ secrets.SUPABASE_KEY }}
@@ -49,17 +48,12 @@ jobs:
           SCRAPER_USERNAME=${{ secrets.SCRAPER_USERNAME }}
           SCRAPER_PASSWORD=${{ secrets.SCRAPER_PASSWORD }}
           EOF
-
-          # Also create in root
           cp scripts/.env .env || true
-
-          # Show that .env was created (masked)
-          echo "✅ .env file created successfully"
+          echo "✅ .env files created"
 
       - name: Create Google credentials file
         run: |
           echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > google-credentials.json
-          # Also copy to scripts directory
           cp google-credentials.json scripts/ || true
           echo "✅ Google credentials created"
 
@@ -73,6 +67,10 @@ jobs:
           SCRAPER_USERNAME: ${{ secrets.SCRAPER_USERNAME }}
           SCRAPER_PASSWORD: ${{ secrets.SCRAPER_PASSWORD }}
         run: |
+          echo "🔍 Debug: Environment variables are set"
+          echo "SUPABASE_URL: ${SUPABASE_URL:+✅ SET}"
+          echo "SUPABASE_KEY: ${SUPABASE_KEY:+✅ SET}"
+
           if [ "${{ github.event.inputs.enable_scraping }}" == "true" ]; then
             echo "Running full pipeline with web scraping..."
             python main.py --full --scrape
