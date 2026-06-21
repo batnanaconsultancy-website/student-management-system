@@ -43,8 +43,8 @@ class ProgressAnalytics:
             students = students_response.data
 
             if not students:
-                print("No student data found")
-                return False
+                print("No student data found — nothing to snapshot yet, this is not an error.")
+                return True
             
             # Calculate statistics
             total_students = len(students)
@@ -145,8 +145,8 @@ class ProgressAnalytics:
             students = students_response.data
             
             if not students:
-                print("No student data found")
-                return False
+                print("No student data found — nothing to report on yet, this is not an error.")
+                return True
             
             # Get season names for better reporting
             seasons_response = self.supabase.table('seasons').select('id, name').execute()

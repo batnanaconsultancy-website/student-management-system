@@ -38,8 +38,8 @@ class PointsAssignmentManager:
             print(f"Found {len(students)} students to process")
 
             if not students:
-                print("No students found to process")
-                return False
+                print("No students found to process — nothing to do, this is not an error.")
+                return True
 
             updated_count = 0
             failed_count = 0
