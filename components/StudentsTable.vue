@@ -143,9 +143,54 @@ const cohortFilter = ref("");
 const cohortItems = ref([]);
 const open = ref(false)
 const openModal = ref(false)
+const openBulkModal = ref(false)
 const selectedStudentId = ref(null)
 const selectedStudentName = ref('')
 const supabase = useSupabaseClient()
+
+// Bulk selection
+const bulkSelectedRows = ref([])
+const bulkAction = ref('')
+const bulkLoading = ref(false)
+const bulkCohortId = ref('')
+
+const { data: cohortsList } = useFetch('/api/cohorts')
+const cohortOptions = computed(() =>
+  (cohortsList.value?.data || []).map((c) => ({ label: c.name, value: c.id }))
+)
+
+const bulkActionOptions = [
+  { label: 'Deactivate selected', value: 'deactivate' },
+  { label: 'Activate selected', value: 'activate' },
+  { label: 'Graduate selected', value: 'graduate' },
+  { label: 'Reassign cohort', value: 'reassign-cohort' },
+]
+
+const handleBulkAction = async () => {
+  if (!bulkAction.value || bulkSelectedRows.value.length === 0) return
+  if (bulkAction.value === 'reassign-cohort' && !bulkCohortId.value) {
+    toast.add({ title: 'Error', description: 'Select a cohort to reassign to', color: 'error' })
+    return
+  }
+  bulkLoading.value = true
+  try {
+    const ids = bulkSelectedRows.value.map((r) => r.original?.id || r.id)
+    await $fetch('/api/students/bulk-action', {
+      method: 'POST',
+      body: { action: bulkAction.value, student_ids: ids, cohort_id: bulkCohortId.value || undefined }
+    })
+    toast.add({ title: 'Done', description: `${bulkAction.value} applied to ${ids.length} student(s)`, color: 'success' })
+    openBulkModal.value = false
+    bulkSelectedRows.value = []
+    bulkAction.value = ''
+    bulkCohortId.value = ''
+    emit('refreshData')
+  } catch (err) {
+    toast.add({ title: 'Error', description: err?.data?.statusMessage || 'Bulk action failed', color: 'error' })
+  } finally {
+    bulkLoading.value = false
+  }
+}
 
 const items = ref([...STATUS_OPTIONS])
 const value = ref('Backlog')
@@ -460,12 +505,37 @@ const onSelect = async (selectedRows: any[]) => {
       </div>
     </div>
 
+    <!-- Bulk action bar -->
+    <div v-if="bulkSelectedRows.length > 0" class="flex items-center gap-3 px-2 py-2 bg-elevated rounded-lg mb-2">
+      <span class="text-sm text-muted">{{ bulkSelectedRows.length }} selected</span>
+      <USelect v-model="bulkAction" :items="bulkActionOptions" placeholder="Choose action" size="sm" class="min-w-44" />
+      <USelect
+        v-if="bulkAction === 'reassign-cohort'"
+        v-model="bulkCohortId"
+        :items="cohortOptions"
+        placeholder="Select cohort"
+        size="sm"
+        class="min-w-44"
+      />
+      <UButton
+        v-if="bulkAction"
+        size="sm"
+        color="primary"
+        variant="soft"
+        :loading="bulkLoading"
+        label="Apply"
+        @click="handleBulkAction"
+      />
+      <UButton size="sm" color="neutral" variant="ghost" label="Clear" @click="bulkSelectedRows = []" />
+    </div>
+
     <UTable
       sticky
       ref="table"
       v-model:column-filters="columnFilters"
       v-model:pagination="pagination"
       v-model:sorting="sorting"
+      v-model:row-selection="bulkSelectedRows"
       @select="onSelect"
       :pagination-options="{
         getPaginationRowModel: getPaginationRowModel(),

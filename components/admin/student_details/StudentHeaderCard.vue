@@ -198,6 +198,45 @@ const formatDateTime = (iso) => {
 
 const emit = defineEmits(['send-email', 'send-slack-message'])
 
+// Student account status management
+const isUpdatingStatus = ref(false)
+const isStatusModalOpen = ref(false)
+const selectedStatus = ref(props.student.account_status || 'Active')
+
+const statusOptions = [
+  { label: 'Active', value: 'Active', color: 'success' },
+  { label: 'Inactive', value: 'Inactive', color: 'warning' },
+  { label: 'Frozen', value: 'Frozen', color: 'info' },
+  { label: 'Graduated', value: 'Graduated', color: 'neutral' },
+]
+
+const statusColor = computed(() => {
+  const map = { Active: 'success', Inactive: 'warning', Frozen: 'info', Graduated: 'neutral' }
+  return map[props.student.account_status] || 'neutral'
+})
+
+const handleStatusChange = async () => {
+  if (selectedStatus.value === props.student.account_status) {
+    isStatusModalOpen.value = false
+    return
+  }
+  try {
+    isUpdatingStatus.value = true
+    const res = await $fetch('/api/students/update-status', {
+      method: 'POST',
+      body: { student_id: props.student.id, account_status: selectedStatus.value }
+    })
+    props.student.account_status = res.data.account_status
+    props.student.is_active = res.data.is_active
+    toast.add({ title: 'Status updated', description: res.message, color: 'success' })
+    isStatusModalOpen.value = false
+  } catch (err) {
+    toast.add({ title: 'Error', description: err?.data?.statusMessage || 'Failed to update status', color: 'error' })
+  } finally {
+    isUpdatingStatus.value = false
+  }
+}
+
 const handleSendEmail = () => {
   window.location.href = `mailto:${props.student.email}`
 }
@@ -311,23 +350,75 @@ const handleSendSlackMessage = () => {
           </div>
         </div>
 
-        <div class="w-full mt-auto flex gap-2">
-          <UButton
-            color="neutral"
-            variant="outline"
-            class="flex-1 justify-center"
-            @click="handleSendEmail"
-          >
-            Send Email
-          </UButton>
-          <UButton
-            color="neutral"
-            variant="outline"
-            class="flex-1 justify-center"
-            @click="handleSendSlackMessage"
-          >
-            Slack Message
-          </UButton>
+        <div class="w-full mt-auto flex flex-col gap-2">
+
+          <!-- Account status badge + change control -->
+          <div class="flex items-center justify-between px-1">
+            <span class="text-xs text-muted">Account status</span>
+            <UBadge :color="statusColor" variant="subtle" size="xs">
+              {{ student.account_status || 'Active' }}
+            </UBadge>
+          </div>
+
+          <UModal v-model:open="isStatusModalOpen">
+            <UButton
+              color="neutral"
+              variant="outline"
+              class="w-full justify-center"
+              icon="i-lucide-shield"
+              @click="selectedStatus = student.account_status; isStatusModalOpen = true"
+            >
+              Change Status
+            </UButton>
+            <template #content>
+              <UCard>
+                <template #header>
+                  <p class="font-medium text-highlighted">Change Account Status</p>
+                  <p class="text-xs text-muted mt-1">
+                    Setting to Inactive, Frozen, or Graduated will stop this student from
+                    being scraped and exclude them from active student counts.
+                  </p>
+                </template>
+                <URadioGroup
+                  v-model="selectedStatus"
+                  :options="statusOptions"
+                  value-key="value"
+                  label-key="label"
+                  class="space-y-2"
+                />
+                <template #footer>
+                  <div class="flex justify-end gap-2">
+                    <UButton label="Cancel" color="neutral" variant="outline" @click="isStatusModalOpen = false" :disabled="isUpdatingStatus" />
+                    <UButton
+                      label="Update Status"
+                      color="primary"
+                      :loading="isUpdatingStatus"
+                      @click="handleStatusChange"
+                    />
+                  </div>
+                </template>
+              </UCard>
+            </template>
+          </UModal>
+
+          <div class="flex gap-2">
+            <UButton
+              color="neutral"
+              variant="outline"
+              class="flex-1 justify-center"
+              @click="handleSendEmail"
+            >
+              Send Email
+            </UButton>
+            <UButton
+              color="neutral"
+              variant="outline"
+              class="flex-1 justify-center"
+              @click="handleSendSlackMessage"
+            >
+              Slack Message
+            </UButton>
+          </div>
         </div>
   </UCard>
 </template>

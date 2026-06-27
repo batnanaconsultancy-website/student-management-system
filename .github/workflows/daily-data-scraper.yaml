@@ -3,22 +3,22 @@ name: Daily Data Scraper
 on:
   # Run daily at 6 AM UTC
   schedule:
-    - cron: "0 6 * * *"
+    - cron: '0 6 * * *'
 
   # Allow manual triggering
   workflow_dispatch:
     inputs:
       scrape_mode:
-        description: "Scraping mode"
+        description: 'Scraping mode'
         required: true
-        default: "full"
+        default: 'full'
         type: choice
         options:
           - full
           - quick
           - data-only
       enable_scraping:
-        description: "Enable web scraping (slower but gets fresh data)"
+        description: 'Enable web scraping (slower but gets fresh data)'
         required: false
         default: false
         type: boolean
@@ -34,8 +34,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          python-version: '3.11'
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -156,3 +156,17 @@ jobs:
           echo "::error::Data scraping pipeline failed. Check the logs for details."
           echo "Run number: ${{ github.run_number }}"
           echo "Run ID: ${{ github.run_id }}"
+
+          # Post failure alert to the app's notification endpoint
+          # The app then emails/Slacks the configured recipients from notification_settings
+          FAILURE_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${{ secrets.APP_URL }}/api/notifications/pipeline-failed" \
+            -H "Content-Type: application/json" \
+            -d "{\"run_number\": \"${{ github.run_number }}\", \"run_id\": \"${{ github.run_id }}\", \"repo\": \"${{ github.repository }}\"}" \
+            --max-time 15)
+
+          if [ "$FAILURE_RESPONSE" -eq 200 ]; then
+            echo "✅ Failure notification sent via app"
+          else
+            echo "⚠️ App notification failed (HTTP $FAILURE_RESPONSE) — check APP_URL secret and that the server is running"
+          fi

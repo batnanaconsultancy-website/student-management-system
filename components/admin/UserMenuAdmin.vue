@@ -30,6 +30,11 @@ const items = computed<DropdownMenuItem[][]>(() => ([[{
     label: 'Notifications',
     icon: 'i-pajamas:group',
     to: '/admin/settings/notifications'
+  },
+  {
+    label: 'Audit Log',
+    icon: 'i-lucide-shield-check',
+    to: '/admin/settings/audit-log'
   }]
 
 }], [{

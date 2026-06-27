@@ -1,3 +1,4 @@
+import { writeAuditLog } from '~/server/utils/auditLog'
 import { createError } from 'h3'
 import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
 
@@ -70,6 +71,9 @@ export default defineEventHandler(async (event) => {
     }
     throw createError({ statusCode: 500, statusMessage: error.message })
   }
+
+  await writeAuditLog(supabase, user.email, 'create_cohort', 'cohort', null,
+    { name, programs: rows.length }, event)
 
   return { data, message: `Cohort "${name}" created for ${rows.length} program(s)` }
 })

@@ -1,3 +1,4 @@
+import { writeAuditLog } from '~/server/utils/auditLog'
 import { createError } from 'h3'
 import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
 
@@ -49,6 +50,9 @@ export default defineEventHandler(async (event) => {
   if (error) {
     throw createError({ statusCode: 500, statusMessage: error.message })
   }
+
+  await writeAuditLog(supabase, user.email, 'remove_admin', 'admin', null,
+    { removed_email: email }, event)
 
   return { message: `${email} removed from admins` }
 })

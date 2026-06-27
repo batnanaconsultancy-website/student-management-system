@@ -75,6 +75,12 @@ const mainLinks: NavigationMenuItem[] = [
         label: 'Projects',
         description: 'Manage projects start and end date.',
         to: '/admin/managment/pcs-projects',
+      },
+      {
+        label: 'Curriculum',
+        description: 'Create new seasons and projects.',
+        icon: 'i-lucide-book-open',
+        to: '/admin/management/curriculum',
       }
     ],
   },

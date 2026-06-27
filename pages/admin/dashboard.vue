@@ -61,6 +61,18 @@
     );
   });
 
+  // Scraper health — last run time + stale warning
+  const { data: scraperHealth } = useFetch('/api/scraper-health')
+
+  const lastScrapeDisplay = computed(() => {
+    const t = scraperHealth.value?.lastScrapeTime
+    if (!t) return 'Never'
+    const d = new Date(t)
+    return d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+  })
+
+  const scraperStale = computed(() => scraperHealth.value?.scrapeStale ?? false)
+
   // Function to force refresh (used by StudentsTable @refresh-data event)
   const fetchStudents = async () => {
     // Clear the cache first so getCachedData returns nothing
@@ -81,6 +93,22 @@
         </template>
 
         <template #body>
+            <!-- Scraper health banner — only shows when pipeline is stale -->
+            <UAlert
+              v-if="scraperStale"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-triangle-alert"
+              class="mb-4 mx-4 mt-4"
+              title="Data pipeline may be stale"
+              :description="`Last successful data update: ${lastScrapeDisplay}. The daily scraper may have failed — check GitHub Actions for details.`"
+            />
+            <!-- Last run info (always visible, subtle) -->
+            <div v-else class="flex items-center gap-1.5 px-4 pt-3 pb-1 text-xs text-muted">
+              <UIcon name="i-lucide-check-circle" class="text-success size-3.5" />
+              <span>Data last updated: {{ lastScrapeDisplay }}</span>
+            </div>
+
             <UPageGrid class="lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-px">
               <StudentStatCard
                 title="STUDENTS"
