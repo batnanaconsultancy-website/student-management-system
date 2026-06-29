@@ -4,7 +4,7 @@ on:
   # Run daily at 6 AM UTC
   schedule:
     - cron: '0 6 * * *'
-
+ 
   # Allow manual triggering
   workflow_dispatch:
     inputs:
@@ -22,6 +22,9 @@ on:
         required: false
         default: false
         type: boolean
+
+permissions:
+  contents: write
 
 jobs:
   scrape-and-update:
