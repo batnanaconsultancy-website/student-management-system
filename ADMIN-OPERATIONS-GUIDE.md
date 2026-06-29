@@ -34,7 +34,7 @@ Go to Supabase → SQL Editor. Run these files IN ORDER, one at a time:
 
 After running file 7, run this to add yourself as admin:
 ```sql
-INSERT INTO admin (email) VALUES ('your-email@amsterdam.tech');
+INSERT INTO admin (email) VALUES ('henry@amsterdam.tech');
 ```
 
 Then verify it worked:

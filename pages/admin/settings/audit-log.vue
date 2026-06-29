@@ -4,15 +4,14 @@ definePageMeta({ layout: 'default', middleware: ['admin'] })
 const limit = 50
 const offset = ref(0)
 const filterAdmin = ref('')
-const filterAction = ref('')
-const searching = ref(false)
+const filterAction = ref('__all__')
 
 const { data, refresh } = useFetch('/api/audit/log', {
   query: computed(() => ({
     limit,
     offset: offset.value,
     admin: filterAdmin.value || undefined,
-    action: filterAction.value || undefined
+    action: filterAction.value === '__all__' ? undefined : filterAction.value
   }))
 })
 
@@ -41,6 +40,12 @@ const actionColor: Record<string, string> = {
   pipeline_failed: 'error'
 }
 
+// Note: value must NOT be empty string in Nuxt UI v3 USelect
+const actionFilterOptions = [
+  { label: 'All actions', value: '__all__' },
+  ...Object.entries(actionLabels).map(([v, l]) => ({ label: l, value: v }))
+]
+
 function formatDate(d: string) {
   return new Date(d).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })
 }
@@ -67,7 +72,7 @@ function formatDate(d: string) {
       />
       <USelect
         v-model="filterAction"
-        :items="[{ label: 'All actions', value: '' }, ...Object.entries(actionLabels).map(([v,l]) => ({ label: l, value: v }))]"
+        :items="actionFilterOptions"
         size="sm"
         class="min-w-52"
         @update:model-value="offset = 0; refresh()"
@@ -115,10 +120,22 @@ function formatDate(d: string) {
 
     <!-- Pagination -->
     <div v-if="total > limit" class="flex justify-between items-center mt-4">
-      <span class="text-xs text-muted">Showing {{ offset + 1 }}–{{ Math.min(offset + limit, total) }} of {{ total }}</span>
+      <span class="text-xs text-muted">
+        Showing {{ offset + 1 }}–{{ Math.min(offset + limit, total) }} of {{ total }}
+      </span>
       <div class="flex gap-2">
-        <UButton size="xs" :disabled="offset === 0" label="Previous" @click="offset = Math.max(0, offset - limit); refresh()" />
-        <UButton size="xs" :disabled="offset + limit >= total" label="Next" @click="offset += limit; refresh()" />
+        <UButton
+          size="xs"
+          :disabled="offset === 0"
+          label="Previous"
+          @click="offset = Math.max(0, offset - limit); refresh()"
+        />
+        <UButton
+          size="xs"
+          :disabled="offset + limit >= total"
+          label="Next"
+          @click="offset += limit; refresh()"
+        />
       </div>
     </div>
   </div>

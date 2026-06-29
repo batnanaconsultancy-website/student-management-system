@@ -198,21 +198,23 @@ const formatDateTime = (iso) => {
 
 const emit = defineEmits(['send-email', 'send-slack-message'])
 
-// Student account status management
+// Account status management
 const isUpdatingStatus = ref(false)
 const isStatusModalOpen = ref(false)
-const selectedStatus = ref(props.student.account_status || 'Active')
+const selectedStatus = ref(props.student?.account_status || 'Active')
 
 const statusOptions = [
-  { label: 'Active', value: 'Active', color: 'success' },
-  { label: 'Inactive', value: 'Inactive', color: 'warning' },
-  { label: 'Frozen', value: 'Frozen', color: 'info' },
-  { label: 'Graduated', value: 'Graduated', color: 'neutral' },
+  { label: 'Active',    value: 'Active' },
+  { label: 'Inactive',  value: 'Inactive' },
+  { label: 'Frozen',    value: 'Frozen' },
+  { label: 'Graduated', value: 'Graduated' },
 ]
 
 const statusColor = computed(() => {
-  const map = { Active: 'success', Inactive: 'warning', Frozen: 'info', Graduated: 'neutral' }
-  return map[props.student.account_status] || 'neutral'
+  const map: Record<string, string> = {
+    Active: 'success', Inactive: 'warning', Frozen: 'info', Graduated: 'neutral'
+  }
+  return map[props.student?.account_status || 'Active'] || 'neutral'
 })
 
 const handleStatusChange = async () => {
@@ -228,10 +230,14 @@ const handleStatusChange = async () => {
     })
     props.student.account_status = res.data.account_status
     props.student.is_active = res.data.is_active
-    toast.add({ title: 'Status updated', description: res.message, color: 'success' })
+    useToast().add({ title: 'Status updated', description: res.message, color: 'success' })
     isStatusModalOpen.value = false
-  } catch (err) {
-    toast.add({ title: 'Error', description: err?.data?.statusMessage || 'Failed to update status', color: 'error' })
+  } catch (err: any) {
+    useToast().add({
+      title: 'Error',
+      description: err?.data?.statusMessage || 'Failed to update status',
+      color: 'error'
+    })
   } finally {
     isUpdatingStatus.value = false
   }
@@ -352,7 +358,7 @@ const handleSendSlackMessage = () => {
 
         <div class="w-full mt-auto flex flex-col gap-2">
 
-          <!-- Account status badge + change control -->
+          <!-- Account status badge -->
           <div class="flex items-center justify-between px-1">
             <span class="text-xs text-muted">Account status</span>
             <UBadge :color="statusColor" variant="subtle" size="xs">
@@ -360,6 +366,7 @@ const handleSendSlackMessage = () => {
             </UBadge>
           </div>
 
+          <!-- Change status modal -->
           <UModal v-model:open="isStatusModalOpen">
             <UButton
               color="neutral"
@@ -375,20 +382,23 @@ const handleSendSlackMessage = () => {
                 <template #header>
                   <p class="font-medium text-highlighted">Change Account Status</p>
                   <p class="text-xs text-muted mt-1">
-                    Setting to Inactive, Frozen, or Graduated will stop this student from
-                    being scraped and exclude them from active student counts.
+                    Inactive, Frozen or Graduated stops this student being scraped.
                   </p>
                 </template>
-                <URadioGroup
+                <USelect
                   v-model="selectedStatus"
-                  :options="statusOptions"
-                  value-key="value"
-                  label-key="label"
-                  class="space-y-2"
+                  :items="statusOptions"
+                  placeholder="Select status"
                 />
                 <template #footer>
                   <div class="flex justify-end gap-2">
-                    <UButton label="Cancel" color="neutral" variant="outline" @click="isStatusModalOpen = false" :disabled="isUpdatingStatus" />
+                    <UButton
+                      label="Cancel"
+                      color="neutral"
+                      variant="outline"
+                      @click="isStatusModalOpen = false"
+                      :disabled="isUpdatingStatus"
+                    />
                     <UButton
                       label="Update Status"
                       color="primary"
@@ -402,22 +412,22 @@ const handleSendSlackMessage = () => {
           </UModal>
 
           <div class="flex gap-2">
-            <UButton
-              color="neutral"
-              variant="outline"
-              class="flex-1 justify-center"
-              @click="handleSendEmail"
-            >
-              Send Email
-            </UButton>
-            <UButton
-              color="neutral"
-              variant="outline"
-              class="flex-1 justify-center"
-              @click="handleSendSlackMessage"
-            >
-              Slack Message
-            </UButton>
+          <UButton
+            color="neutral"
+            variant="outline"
+            class="flex-1 justify-center"
+            @click="handleSendEmail"
+          >
+            Send Email
+          </UButton>
+          <UButton
+            color="neutral"
+            variant="outline"
+            class="flex-1 justify-center"
+            @click="handleSendSlackMessage"
+          >
+            Slack Message
+          </UButton>
           </div>
         </div>
   </UCard>
