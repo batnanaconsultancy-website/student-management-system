@@ -137,9 +137,9 @@ const sorting = ref([
   },
 ]);
 
-const statusFilter = ref("");
-const programFilter = ref("");
-const cohortFilter = ref("");
+const statusFilter = ref("all");
+const programFilter = ref("all");
+const cohortFilter = ref("all");
 const cohortItems = ref([]);
 const open = ref(false)
 const openModal = ref(false)
@@ -189,6 +189,10 @@ watch(
   () => cohortFilter.value,
   (newVal) => {
     if (!table?.value?.tableApi) return;
+    if (newVal === 'all') {
+      table.value.tableApi.getColumn('cohort')?.setFilterValue(undefined)
+      return
+    }
 
     const cohortColumn = table.value.tableApi.getColumn("cohort");
     if (!cohortColumn) return;
@@ -205,6 +209,10 @@ watch(
   () => programFilter.value,
   (newVal) => {
     if (!table?.value?.tableApi) return;
+    if (newVal === 'all') {
+      table.value.tableApi.getColumn('program')?.setFilterValue(undefined)
+      return
+    }
 
     const programColumn = table.value.tableApi.getColumn("program");
 
@@ -222,6 +230,10 @@ watch(
   () => statusFilter.value,
   (newVal) => {
     if (!table?.value?.tableApi) return;
+    if (newVal === 'all') {
+      table.value.tableApi.getColumn('status')?.setFilterValue(undefined)
+      return
+    }
 
     const statusColumn = table.value.tableApi.getColumn("status");
     if (!statusColumn) return;
