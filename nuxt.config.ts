@@ -23,6 +23,7 @@ export default defineNuxtConfig({
   supabase: {
     url: process.env.NUXT_PUBLIC_SUPABASE_URL,
     key: process.env.NUXT_PUBLIC_SUPABASE_KEY,
+    serviceKey: process.env.SUPABASE_SERVICE_KEY,
     redirectOptions: {
       login: "/", // User will be redirected to this path if not authenticated or after logout.
       callback: "/auth/confirm", // This is the path the user will be redirect to after supabase login redirection.
@@ -33,13 +34,15 @@ export default defineNuxtConfig({
   },
 
   nodemailer: {
-    from: process.env.NUXT_NODEMAILER_FROM || '"Student Management System" <notifications@yourdomain.com>',
-    host: process.env.NUXT_NODEMAILER_HOST || 'smtp.gmail.com',
+    from:
+      process.env.NUXT_NODEMAILER_FROM ||
+      '"Student Management System" <notifications@yourdomain.com>',
+    host: process.env.NUXT_NODEMAILER_HOST || "smtp.gmail.com",
     port: 587,
     secure: false,
     auth: {
-      user: process.env.NUXT_NODEMAILER_AUTH_USER || '',
-      pass: process.env.NUXT_NODEMAILER_AUTH_PASS || '',
+      user: process.env.NUXT_NODEMAILER_AUTH_USER || "",
+      pass: process.env.NUXT_NODEMAILER_AUTH_PASS || "",
     },
   },
 
