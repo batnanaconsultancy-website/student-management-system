@@ -48,42 +48,95 @@ def get_supabase_client(service_role=False):
     """Get configured Supabase client instance"""
     return SupabaseClient().get_client(service_role)
 
+# def map_season_name_to_db(season_name):
+#     """
+#     Map scraped season names to database season names
+#     Handles Season 03 Software Engineer variations with specific language mappings
+#     """
+#     if not season_name:
+#         return season_name
+    
+#     season_name = season_name.strip()
+    
+#     # Handle Season 03 Software Engineer variations with specific language mappings
+#     if re.match(r'Season 03 Software Engineer', season_name, re.IGNORECASE):
+#         # Map specific language variants
+#         if 'Cpp' in season_name:
+#             return "Season 03 Software Engineer Cpp"
+#         elif 'Rust' in season_name:
+#             return "Season 03 Software Engineer Rust"
+#         elif 'Golang' in season_name or 'Go' in season_name:
+#             return "Season 03 Software Engineer Go"
+#         else:
+#             # If it's just "Season 03 Software Engineer" without specific language,
+#             # we can't map it properly
+#             print(f"Warning: Found '{season_name}' but no specific language variant.")
+#             return season_name
+    
+#     # Handle other specific mappings based on what exists in the database
+#     mappings = {
+#         'Preseason Data': 'Preseason Data',
+#         'Preseason Web': 'Preseason Web',
+#         'Season 02 Data Science': 'Season 02 Data Science',
+#         'Season 02 Software Engineer': 'Season 02 Software Engineer',
+#         'Season 03 Data Science': 'Season 03 Data Science',
+#         'Season 03 Machine Learning': 'Season 03 Machine Learning'
+#     }
+    
+#     return mappings.get(season_name, season_name)
+
+
+
+
+import re
+
 def map_season_name_to_db(season_name):
     """
-    Map scraped season names to database season names
-    Handles Season 03 Software Engineer variations with specific language mappings
+    Normalize a scraped Qwasar season name down to the generic base name
+    used in the `seasons` table (program_id already disambiguates, so the
+    program/specialization suffix scraped from the site is redundant).
+
+    Returns None for stages that are intentionally not tracked as seasons
+    (e.g. 'Onboarding', which happens before Preseason and isn't modeled).
     """
     if not season_name:
-        return season_name
-    
-    season_name = season_name.strip()
-    
-    # Handle Season 03 Software Engineer variations with specific language mappings
-    if re.match(r'Season 03 Software Engineer', season_name, re.IGNORECASE):
-        # Map specific language variants
-        if 'Cpp' in season_name:
-            return "Season 03 Software Engineer Cpp"
-        elif 'Rust' in season_name:
-            return "Season 03 Software Engineer Rust"
-        elif 'Golang' in season_name or 'Go' in season_name:
-            return "Season 03 Software Engineer Go"
-        else:
-            # If it's just "Season 03 Software Engineer" without specific language,
-            # we can't map it properly
-            print(f"Warning: Found '{season_name}' but no specific language variant.")
-            return season_name
-    
-    # Handle other specific mappings based on what exists in the database
-    mappings = {
-        'Preseason Data': 'Preseason Data',
-        'Preseason Web': 'Preseason Web',
-        'Season 02 Data Science': 'Season 02 Data Science',
-        'Season 02 Software Engineer': 'Season 02 Software Engineer',
-        'Season 03 Data Science': 'Season 03 Data Science',
-        'Season 03 Machine Learning': 'Season 03 Machine Learning'
-    }
-    
-    return mappings.get(season_name, season_name)
+        return None
+
+    name = season_name.strip()
+
+    # Onboarding happens before Preseason and is not tracked as a season.
+    if name.lower() == 'onboarding':
+        return None
+
+    # Preseason Data / Preseason Web -> Preseason
+    if re.match(r'^Preseason\b', name, re.IGNORECASE):
+        return 'Preseason'
+
+    # Season 01 Arc 01 / Arc 02 -> kept as-is (Software Engineering only,
+    # these already match the seasons table exactly)
+    m = re.match(r'^(Season 01 Arc 0[12])\b', name, re.IGNORECASE)
+    if m:
+        return m.group(1)
+
+    # Season 01 (no Arc) -> Season 01
+    if re.match(r'^Season 01\b', name, re.IGNORECASE):
+        return 'Season 01'
+
+    # Season 02 Data Science / Software Engineer / Fullstack -> Season 02
+    if re.match(r'^Season 02\b', name, re.IGNORECASE):
+        return 'Season 02'
+
+    # Season 03 Data Science / Machine Learning / Backend / Software
+    # Engineer (Cpp/Rust/Go/Golang) -> Season 03
+    if re.match(r'^Season 03\b', name, re.IGNORECASE):
+        return 'Season 03'
+
+    # Unrecognized label - log and pass through unchanged so it's visible
+    # rather than silently dropped.
+    print(f"Warning: Unrecognized season name '{name}' - no mapping rule matched.")
+    return name
+
+
 
 def parse_relative_time_to_timestamp(relative_time_str):
     """
