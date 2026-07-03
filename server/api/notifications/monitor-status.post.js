@@ -3,13 +3,8 @@ import { serverSupabaseServiceRole } from "#supabase/server";
 
 export default defineEventHandler(async (event) => {
   try {
-    // IMPORTANT: this endpoint is called server-to-server (e.g. from the
-    // GitHub Actions scraper workflow via a plain curl POST), not from a
-    // logged-in browser session. serverSupabaseClient() authenticates as
-    // the current user via cookies and falls back to the anon role when
-    // there is none -- which gets blocked by RLS on `students` and other
-    // tables. serverSupabaseServiceRole() bypasses RLS the same way the
-    // Python scripts do via SUPABASE_ROLE_KEY.
+    // Server-to-server call (GitHub Actions curl, no user session) --
+    // must use the service role client to bypass RLS. See earlier fix.
     const client = serverSupabaseServiceRole(event);
 
     // Get all students with their current status
@@ -51,71 +46,71 @@ export default defineEventHandler(async (event) => {
       }
     }
 
-    // If there are status changes, trigger notifications
+    // If there are status changes, notify admins via in-app inbox
+    // (admin_notifications table). This replaces email/Slack for now
+    // -- SMTP wiring can be reinstated later by uncommenting the
+    // $fetch calls further down, once real SMTP credentials and
+    // notification_settings.email_enabled / slack_enabled are set.
     if (statusChanges.length > 0) {
-      // Get notification settings
+      // Get notification settings (still used to gate at-risk vs
+      // monitor filtering, even though we're not emailing/slacking)
       const { data: settings } = await client
         .from("notification_settings")
         .select("*")
         .single();
 
-      if (settings) {
-        // Log status changes
-        await client.from("status_change_log").insert(
-          statusChanges.map((change) => ({
-            student_id: change.student_id,
-            previous_status: change.previous_status,
-            new_status: change.current_status,
-            changed_at: change.changed_at,
-          })),
-        );
+      // Log status changes (unchanged from before)
+      await client.from("status_change_log").insert(
+        statusChanges.map((change) => ({
+          student_id: change.student_id,
+          previous_status: change.previous_status,
+          new_status: change.current_status,
+          changed_at: change.changed_at,
+        })),
+      );
 
-        // Send notifications based on settings
-        const notifications = [];
+      // Filter to only the change types the settings say to notify on
+      const notifiableChanges = statusChanges.filter(
+        (c) =>
+          (settings?.notify_on_at_risk && c.current_status === "At Risk") ||
+          (settings?.notify_on_monitor && c.current_status === "Monitor"),
+      );
 
-        if (settings.email_enabled && settings.email_recipients?.length > 0) {
-          if (
-            (settings.notify_on_at_risk &&
-              statusChanges.some((c) => c.current_status === "At Risk")) ||
-            (settings.notify_on_monitor &&
-              statusChanges.some((c) => c.current_status === "Monitor"))
-          ) {
-            notifications.push(
-              $fetch("/api/notifications/send-email", {
-                method: "POST",
-                body: {
-                  recipients: settings.email_recipients,
-                  changes: statusChanges,
-                },
-              }),
-            );
-          }
-        }
+      if (notifiableChanges.length > 0) {
+        // Fan out one admin_notifications row per admin per change,
+        // same pattern as report-issue.post.js
+        const { data: admins } = await client.from("admin").select("email");
 
-        if (settings.slack_enabled && settings.slack_webhook_url) {
-          if (
-            (settings.notify_on_at_risk &&
-              statusChanges.some((c) => c.current_status === "At Risk")) ||
-            (settings.notify_on_monitor &&
-              statusChanges.some((c) => c.current_status === "Monitor"))
-          ) {
-            notifications.push(
-              $fetch("/api/notifications/send-slack", {
-                method: "POST",
-                body: {
-                  webhook_url: settings.slack_webhook_url,
-                  changes: statusChanges,
-                },
-              }),
-            );
-          }
-        }
+        if (admins && admins.length > 0) {
+          const rows = admins.flatMap((admin) =>
+            notifiableChanges.map((change) => ({
+              admin_email: admin.email,
+              type: "status_change",
+              title: `${change.first_name || "A student"} moved to ${change.current_status}`,
+              body: `Status changed from ${change.previous_status || "Unknown"} to ${change.current_status}.`,
+              entity_type: "student",
+              entity_id: change.student_id,
+              is_read: false,
+            })),
+          );
 
-        // Wait for all notifications to be sent
-        if (notifications.length > 0) {
-          await Promise.allSettled(notifications);
+          await client.from("admin_notifications").insert(rows);
         }
       }
+
+      // ---- SMTP / Slack (disabled for now, kept for future use) ----
+      // if (settings?.email_enabled && settings.email_recipients?.length > 0) {
+      //     await $fetch('/api/notifications/send-email', {
+      //         method: 'POST',
+      //         body: { recipients: settings.email_recipients, changes: notifiableChanges }
+      //     })
+      // }
+      // if (settings?.slack_enabled && settings.slack_webhook_url) {
+      //     await $fetch('/api/notifications/send-slack', {
+      //         method: 'POST',
+      //         body: { webhook_url: settings.slack_webhook_url, changes: notifiableChanges }
+      //     })
+      // }
     }
 
     return {
