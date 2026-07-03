@@ -42,6 +42,9 @@ const handleSendSlackMessage = (student) => {
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
+      <template #right>
+          <NotificationBell />
+      </template>
       </UDashboardNavbar>
     </template>
 
