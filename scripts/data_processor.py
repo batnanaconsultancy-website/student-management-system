@@ -583,9 +583,13 @@ class StudentDataProcessor:
         
         # Get student program mapping for season filtering
         self.student_program_map = self._get_student_program_map()
-        
+
         # Get seasons grouped by program for proper filtering
         self.seasons_by_program = self._get_seasons_by_program()
+
+        # Denormalized student identity info, used to make
+        # student_duplicate_project_report rows readable without joins
+        self.student_details_map = self._get_student_details_map()
     
     def _get_student_program_map(self):
         """Get mapping of student_id to program_id"""
@@ -595,7 +599,19 @@ class StudentDataProcessor:
         except Exception as e:
             print(f"Error fetching student program mapping: {e}")
             return {}
-    
+
+    def _get_student_details_map(self):
+        """Get mapping of student_id -> identity fields, for denormalizing
+        onto student_duplicate_project_report rows."""
+        try:
+            response = self.supabase.from_('students').select(
+                'id, username, email, first_name, last_name'
+            ).execute()
+            return {row['id']: row for row in response.data}
+        except Exception as e:
+            print(f"Error fetching student details map: {e}")
+            return {}
+
     def _get_seasons_by_program(self):
         """Get seasons grouped by program_id"""
         try:
@@ -723,9 +739,28 @@ class StudentDataProcessor:
     def update_season_progress(self, scraped_data):
         """Update student season progress"""
         print_step("SEASON PROGRESS", "Updating student progress across seasons")
-        
-        records_to_upsert = []
-        
+
+        # Keyed by (student_id, season_id) rather than a plain list. Multiple
+        # raw scraped season names can collapse onto the same season_id for
+        # one student -- either a genuine data quirk, or (per university
+        # policy) a student deliberately taking an extra track in parallel
+        # (e.g. Data Science AND Fullstack/Backend at once, an allowed paid
+        # option). Appending each as a separate row previously produced two
+        # rows with an identical (student_id, season_id) key in the same
+        # upsert batch, which Postgres rejects outright with "ON CONFLICT DO
+        # UPDATE command cannot affect row a second time" -- silently
+        # failing the ENTIRE batch, not just the colliding student.
+        #
+        # Fix: keep only the higher-progress entry per (student_id,
+        # season_id) for the real student_season_progress table (this is
+        # what drives status/progress calculations), and preserve the
+        # lower-progress "extra track" entry in student_duplicate_project_report
+        # instead of discarding it, so it stays visible for review.
+        records_by_key = {}
+        raw_label_by_key = {}   # tracks which raw scraped label won, for reporting
+        duplicate_reports = {}  # keyed by (student_id, season_id, discarded_label)
+        duplicates_resolved = 0
+
         for student_data in scraped_data:
             username = student_data.get("name")
             if not username or username not in self.student_id_map:
@@ -785,12 +820,64 @@ class StudentDataProcessor:
                     "completion_date": datetime.now().date().isoformat() if completion_percentage >= 100 else None,
                     "updated_at": datetime.now().isoformat()
                 }
-                
-                records_to_upsert.append(progress_record)
-        
+
+                key = (student_id, season_id)
+                existing = records_by_key.get(key)
+
+                if existing is None:
+                    records_by_key[key] = progress_record
+                    raw_label_by_key[key] = season_name
+                    continue
+
+                duplicates_resolved += 1
+                existing_label = raw_label_by_key[key]
+                existing_pct = existing["progress_percentage"]
+
+                if completion_percentage > existing_pct:
+                    kept_label, kept_pct = season_name, completion_percentage
+                    discarded_label, discarded_pct = existing_label, existing_pct
+                    records_by_key[key] = progress_record
+                    raw_label_by_key[key] = season_name
+                else:
+                    kept_label, kept_pct = existing_label, existing_pct
+                    discarded_label, discarded_pct = season_name, completion_percentage
+
+                print(f"  Duplicate season entry for {username} (season_id={season_id}): "
+                      f"keeping '{kept_label}' ({kept_pct}%) over '{discarded_label}' ({discarded_pct}%)")
+
+                details = self.student_details_map.get(student_id, {})
+                report_key = (student_id, season_id, discarded_label)
+                duplicate_reports[report_key] = {
+                    "student_id": student_id,
+                    "student_username": details.get("username", username),
+                    "student_email": details.get("email", ""),
+                    "student_first_name": details.get("first_name", ""),
+                    "student_last_name": details.get("last_name", ""),
+                    "season_id": season_id,
+                    "season_name": mapped_season_name,
+                    "kept_raw_label": kept_label,
+                    "kept_progress_percentage": kept_pct,
+                    "discarded_raw_label": discarded_label,
+                    "discarded_progress_percentage": discarded_pct,
+                    "scraped_at": datetime.now().isoformat()
+                }
+
+        records_to_upsert = list(records_by_key.values())
+        reports_to_upsert = list(duplicate_reports.values())
+
+        if duplicates_resolved:
+            safe_print(f"[INFO] Resolved {duplicates_resolved} duplicate season-progress entr"
+                       f"{'y' if duplicates_resolved == 1 else 'ies'} before upsert")
+
         if records_to_upsert:
             safe_upsert(self.supabase, 'student_season_progress', records_to_upsert, 
                        on_conflict="student_id, season_id")
+
+        if reports_to_upsert:
+            safe_upsert(self.supabase, 'student_duplicate_project_report', reports_to_upsert,
+                       on_conflict="student_id, season_id, discarded_raw_label")
+            safe_print(f"[OK] Recorded {len(reports_to_upsert)} duplicate-track report "
+                       f"{'entry' if len(reports_to_upsert) == 1 else 'entries'}")
             safe_print(f"[OK] Updated {len(records_to_upsert)} season progress records")
         else:
             print("No season progress records to update")
