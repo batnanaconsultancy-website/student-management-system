@@ -81,6 +81,12 @@ const mainLinks: NavigationMenuItem[] = [
         description: 'Create new seasons and projects.',
         icon: 'i-lucide-book-open',
         to: '/admin/management/curriculum',
+      },
+      {
+        label: 'Extra Tracks',
+        description: 'Students tracking an additional season/course.',
+        icon: 'i-lucide-layers',
+        to: '/admin/managment/extra-tracks',
       }
     ],
   },

@@ -61,6 +61,15 @@
         text: "Notifications",
       },
     },
+    {
+      label: "Extra Tracks",
+      to: "/students/extra-tracks",
+      ariaLabel: "Extra Tracks",
+      icon: "i-lucide-layers",
+      tooltip: {
+        text: "Extra Tracks",
+      },
+    },
   ];
 
   const secondaryLinks: NavigationMenuItem[] = [
