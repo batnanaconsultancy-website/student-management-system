@@ -963,7 +963,8 @@ class ProjectCompletionProcessor:
                         "student_id": student_id,
                         "project_id": project_id,
                         "is_completed": True,
-                        "completion_date": datetime.now().date().isoformat()
+                        "completion_date": datetime.now().date().isoformat(),
+                        "completed_at": datetime.now().date().isoformat()
                     }
 
             # Process ongoing projects (only if not already completed)
