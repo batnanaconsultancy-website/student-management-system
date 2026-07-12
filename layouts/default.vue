@@ -88,6 +88,12 @@ const mainLinks: NavigationMenuItem[] = [
         icon: "i-lucide-layers",
         to: "/admin/managment/extra-tracks",
       },
+      {
+        label: "Meetings",
+        description: "Schedule weekly meetings pinned to student calendars.",
+        icon: "i-lucide-calendar-clock",
+        to: "/admin/managment/meetings",
+      },
     ],
   },
 ];
