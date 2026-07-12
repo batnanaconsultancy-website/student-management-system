@@ -817,8 +817,8 @@ class StudentDataProcessor:
                     "season_id": season_id,
                     "progress_percentage": completion_percentage,
                     "is_completed": completion_percentage >= 100,
-                    "completion_date": datetime.now().date().isoformat() if completion_percentage >= 100 else None,
-                    "updated_at": datetime.now().isoformat()
+                    # "completion_date": datetime.now().date().isoformat() if completion_percentage >= 100 else None,
+                    "updated_at": datetime.now().isoformat() if completion_percentage >= 100 else None,
                 }
 
                 key = (student_id, season_id)
@@ -963,7 +963,7 @@ class ProjectCompletionProcessor:
                         "student_id": student_id,
                         "project_id": project_id,
                         "is_completed": True,
-                        "completion_date": datetime.now().date().isoformat(),
+                        # "completion_date": datetime.now().date().isoformat(),
                         "completed_at": datetime.now().date().isoformat()
                     }
 
@@ -985,7 +985,7 @@ class ProjectCompletionProcessor:
                             "student_id": student_id,
                             "project_id": project_id,
                             "is_completed": False,
-                            "completion_date": None
+                            # "completion_date": None
                         }
 
         records_to_upsert = list(records_dict.values())
