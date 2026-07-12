@@ -207,6 +207,8 @@ const getEventsForDate = (date) => {
 };
 
 // Initialize and fetch calendar data
+// Always fetch, even without a Google token — admin-pinned meetings
+// should still show up for students who haven't connected Google Calendar.
 onMounted(async () => {
     const {
         data: { session },
@@ -214,9 +216,7 @@ onMounted(async () => {
 
     googleAccessToken.value = session?.provider_token || null;
 
-    if (googleAccessToken.value) {
-        await refreshCalendar();
-    }
+    await refreshCalendar();
 });
 
 // Watch for token changes and re-fetch events
@@ -226,11 +226,10 @@ watch(
       if (!newToken) {
         try {
           await refreshGoogleToken();
-          if (googleAccessToken.value) {
-            await refreshCalendar();
-          }
         } catch (error) {
           console.error("Failed to refresh Google token", error);
+        } finally {
+          await refreshCalendar();
         }
       }
     },
@@ -239,12 +238,10 @@ watch(
 
 // Re-fetch events when month changes (invalidate cache for new month)
 watch([currentMonth, currentYear], async () => {
-    if (googleAccessToken.value) {
-        // Clear cache for the new month key and refresh
-        const newKey = `${CACHE_KEYS.STUDENT_CALENDAR_MONTH}-${currentYear.value}-${currentMonth.value}`;
-        delete nuxtApp.payload.data[newKey];
-        await refreshCalendar();
-    }
+    // Clear cache for the new month key and refresh
+    const newKey = `${CACHE_KEYS.STUDENT_CALENDAR_MONTH}-${currentYear.value}-${currentMonth.value}`;
+    delete nuxtApp.payload.data[newKey];
+    await refreshCalendar();
 });
 </script>
 
@@ -401,10 +398,16 @@ watch([currentMonth, currentYear], async () => {
                     :href="event.location || event.hangoutLink || '#'"
                     target="_blank"
                     rel="noopener noreferrer"
-                    class="text-xs px-1.5 py-0.5 rounded bg-primary-100 text-primary-700 border-l border-primary-600 truncate block hover:bg-primary-200 transition-colors cursor-pointer"
-                    :title="event.summary + (event.location ? '\n' + event.location : '')"
+                    :class="[
+                      'text-xs px-1.5 py-0.5 rounded border-l truncate flex items-center gap-1 transition-colors cursor-pointer',
+                      event.pinned
+                        ? 'bg-amber-100 text-amber-800 border-amber-500 hover:bg-amber-200 dark:bg-amber-950 dark:text-amber-300'
+                        : 'bg-primary-100 text-primary-700 border-primary-600 hover:bg-primary-200'
+                    ]"
+                    :title="(event.pinned ? '📌 ' : '') + event.summary + (event.location ? '\n' + event.location : '')"
                   >
-                    {{ event.summary }}
+                    <UIcon v-if="event.pinned" name="i-lucide-pin" class="size-3 shrink-0" />
+                    <span class="truncate">{{ event.summary }}</span>
                   </a>
                 </div>
               </UCard>
@@ -446,10 +449,13 @@ watch([currentMonth, currentYear], async () => {
               <UCard
                 v-for="event in getEventsForDate(selectedDay)"
                 :key="event.id"
-                class="border-l-4 border-primary-600"
+                :class="event.pinned ? 'border-l-4 border-amber-500' : 'border-l-4 border-primary-600'"
               >
                 <div class="space-y-2">
-                  <h4 class="font-semibold">{{ event.summary }}</h4>
+                  <h4 class="font-semibold flex items-center gap-1.5">
+                    <UIcon v-if="event.pinned" name="i-lucide-pin" class="size-3.5 text-amber-600" />
+                    {{ event.summary }}
+                  </h4>
 
                   <div v-if="event.start?.dateTime" class="flex items-center gap-2 text-sm text-muted">
                     <Icon name="i-lucide:clock" class="w-4 h-4" />

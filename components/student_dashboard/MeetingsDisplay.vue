@@ -3,24 +3,23 @@
   import { CACHE_KEYS } from '~/composables/useCacheInvalidation';
 
   const props = defineProps({
-    googleAccessToken: { type: String, required: true },
+    googleAccessToken: { type: String, default: null },
   });
 
   const nuxtApp = useNuxtApp();
   const meetingsScroll = ref(null);
 
-  // Use cached fetch for calendar events
+  // Use cached fetch for calendar events. Always fetch — admin-pinned
+  // meetings should show even for students without Google Calendar connected.
   const { data: calendarData } = useFetch('/api/student/calendar-events', {
     key: CACHE_KEYS.STUDENT_CALENDAR_TODAY,
     query: { period: 'today' },
-    headers: {
-      'x-google-token': props.googleAccessToken
-    },
+    headers: computed(() => ({
+      'x-google-token': props.googleAccessToken || ''
+    })),
     getCachedData(key) {
       return nuxtApp.payload.data[key] || nuxtApp.static.data[key]
-    },
-    // Only fetch if we have a token
-    immediate: !!props.googleAccessToken
+    }
   });
 
   const calendarEvents = computed(() => calendarData.value?.data || []);
@@ -108,14 +107,17 @@
           ]"
           variant="outline"
           :ui="{
-            root: 'w-full border-l-5 border-primary dark:border-primary-200',
+            root: events.pinned
+              ? 'w-full border-l-5 border-amber-500 dark:border-amber-400'
+              : 'w-full border-l-5 border-primary dark:border-primary-200',
             body: 'xl:!px-6 px-6 xl:!py-4 2xl:!py-4 h-full flex',
           }"
         >
           <template #default>
             <div class="flex w-full flex-1 flex-col justify-between gap-2">
               <div class="flex flex-col gap-2">
-                <h1 class="text-primary-950 font-medium xl:text-base 2xl:text-base">
+                <h1 class="text-primary-950 font-medium xl:text-base 2xl:text-base flex items-center gap-1.5">
+                  <UIcon v-if="events.pinned" name="i-lucide-pin" class="size-3.5 text-amber-600 shrink-0" />
                   {{ events.summary }}
                 </h1>
                 <p class="text-primary-950 xl:text-sm 2xl:text-sm">

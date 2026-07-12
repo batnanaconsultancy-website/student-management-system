@@ -19,6 +19,11 @@ const links = [[ {
     label: 'Projects',
     icon: 'i-pajamas:book',
     to: '/admin/managment/pcs-projects'
+},
+{
+    label: 'Meetings',
+    icon: 'i-lucide-calendar-clock',
+    to: '/admin/managment/meetings'
 }],] satisfies NavigationMenuItem[][]
 </script>
 

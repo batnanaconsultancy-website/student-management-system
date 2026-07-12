@@ -173,7 +173,9 @@
 
         <UPageGrid class="grid-cols-1 sm:grid-cols-1 lg:grid-cols-2 mt-14 lg:gap-10">
           <div class="flex flex-col gap-1">            
-            <StudentDashboardMeetingsDisplay v-if="googleAccessToken" :googleAccessToken="googleAccessToken" />
+            <StudentDashboardMeetingsDisplay :googleAccessToken="googleAccessToken" />
+
+            <StudentDashboardDeadlinesCard />
           </div>
            
            <div class="flex flex-col justify-between 2xl:gap-4">

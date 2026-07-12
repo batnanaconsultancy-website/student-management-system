@@ -4,7 +4,7 @@ on:
   # Run daily at 6:30 AM UTC — after the data scraper's status pass,
   # early enough to notify students before their day's meetings.
   schedule:
-    - cron: '30 6 * * *'
+    - cron: " 7 * * *"
 
   # Allow manual triggering for testing
   workflow_dispatch: {}
