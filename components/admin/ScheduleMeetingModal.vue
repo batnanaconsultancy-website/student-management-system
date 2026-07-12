@@ -23,8 +23,8 @@ function emptyForm() {
     end_time: '11:00',
     starts_on: new Date().toISOString().slice(0, 10),
     ends_on: '',
-    program_id: null as string | null,
-    cohort_id: null as string | null,
+    program_id: 'all' as string,
+    cohort_id: 'all' as string,
     is_active: true,
   }
 }
@@ -46,8 +46,8 @@ watch(
         end_time: (meeting.end_time || '11:00').slice(0, 5),
         starts_on: meeting.starts_on || new Date().toISOString().slice(0, 10),
         ends_on: meeting.ends_on || '',
-        program_id: meeting.program_id || null,
-        cohort_id: meeting.cohort_id || null,
+        program_id: meeting.program_id || 'all',
+        cohort_id: meeting.cohort_id || 'all',
         is_active: meeting.is_active !== false,
       }
     } else {
@@ -95,6 +95,8 @@ async function handleSubmit() {
       ends_on: formData.value.ends_on || null,
       description: formData.value.description || null,
       meeting_link: formData.value.meeting_link || null,
+      program_id: formData.value.program_id === 'all' ? null : formData.value.program_id,
+      cohort_id: formData.value.cohort_id === 'all' ? null : formData.value.cohort_id,
     })
   } finally {
     loading.value = false
@@ -205,7 +207,7 @@ function handleClose() {
               </label>
               <USelect
                 v-model="formData.program_id"
-                :items="[{ label: 'All Programs', value: null }, ...programOptions]"
+                :items="[{ label: 'All Programs', value: 'all' }, ...programOptions]"
                 value-key="value"
                 :disabled="loading"
               />
@@ -216,7 +218,7 @@ function handleClose() {
               </label>
               <USelect
                 v-model="formData.cohort_id"
-                :items="[{ label: 'All Cohorts', value: null }, ...cohortOptions]"
+                :items="[{ label: 'All Cohorts', value: 'all' }, ...cohortOptions]"
                 value-key="value"
                 :disabled="loading"
               />
