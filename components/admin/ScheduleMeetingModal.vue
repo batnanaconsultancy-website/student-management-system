@@ -1,0 +1,249 @@
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { DAY_OPTIONS } from '~/composables/useScheduledMeetings'
+
+const props = defineProps({
+  isOpen: { type: Boolean, required: true },
+  editingMeeting: { type: Object, default: null },
+  programOptions: { type: Array, default: () => [] },
+  cohortOptions: { type: Array, default: () => [] },
+})
+
+const emit = defineEmits(['close', 'submit', 'update:isOpen'])
+
+const dayItems = DAY_OPTIONS.map(d => ({ label: d.label, value: d.value }))
+
+function emptyForm() {
+  return {
+    title: '',
+    description: '',
+    meeting_link: '',
+    day_of_week: 1,
+    start_time: '10:00',
+    end_time: '11:00',
+    starts_on: new Date().toISOString().slice(0, 10),
+    ends_on: '',
+    program_id: null as string | null,
+    cohort_id: null as string | null,
+    is_active: true,
+  }
+}
+
+const formData = ref(emptyForm())
+const errors = ref<Record<string, string>>({})
+const loading = ref(false)
+
+watch(
+  () => props.editingMeeting,
+  (meeting) => {
+    if (meeting) {
+      formData.value = {
+        title: meeting.title || '',
+        description: meeting.description || '',
+        meeting_link: meeting.meeting_link || '',
+        day_of_week: meeting.day_of_week ?? 1,
+        start_time: (meeting.start_time || '10:00').slice(0, 5),
+        end_time: (meeting.end_time || '11:00').slice(0, 5),
+        starts_on: meeting.starts_on || new Date().toISOString().slice(0, 10),
+        ends_on: meeting.ends_on || '',
+        program_id: meeting.program_id || null,
+        cohort_id: meeting.cohort_id || null,
+        is_active: meeting.is_active !== false,
+      }
+    } else {
+      formData.value = emptyForm()
+    }
+  },
+  { immediate: true }
+)
+
+function validateForm() {
+  errors.value = {}
+  let isValid = true
+
+  if (!formData.value.title.trim()) {
+    errors.value.title = 'Title is required'
+    isValid = false
+  }
+  if (!formData.value.start_time) {
+    errors.value.start_time = 'Start time is required'
+    isValid = false
+  }
+  if (!formData.value.end_time) {
+    errors.value.end_time = 'End time is required'
+    isValid = false
+  }
+  if (formData.value.start_time && formData.value.end_time && formData.value.end_time <= formData.value.start_time) {
+    errors.value.end_time = 'End time must be after start time'
+    isValid = false
+  }
+  if (formData.value.ends_on && formData.value.ends_on < formData.value.starts_on) {
+    errors.value.ends_on = 'End date must be after start date'
+    isValid = false
+  }
+
+  return isValid
+}
+
+async function handleSubmit() {
+  if (!validateForm()) return
+
+  loading.value = true
+  try {
+    emit('submit', {
+      ...formData.value,
+      ends_on: formData.value.ends_on || null,
+      description: formData.value.description || null,
+      meeting_link: formData.value.meeting_link || null,
+    })
+  } finally {
+    loading.value = false
+  }
+}
+
+function handleClose() {
+  formData.value = emptyForm()
+  errors.value = {}
+  emit('close')
+}
+</script>
+
+<template>
+  <UModal :open="isOpen" @update:open="emit('update:isOpen', $event)" @close="handleClose">
+    <UModalContent>
+      <UModalHeader>
+        <div class="flex items-center gap-3">
+          <div class="bg-primary/10 border-primary flex h-10 w-10 items-center justify-center rounded-full border">
+            <UIcon name="i-lucide-calendar-plus" class="text-primary size-5" />
+          </div>
+          <div>
+            <h2 class="text-lg font-semibold text-highlighted">
+              {{ editingMeeting ? 'Edit Scheduled Meeting' : 'Schedule Weekly Meeting' }}
+            </h2>
+            <p class="text-sm text-muted">Pins automatically to every matching student's calendar</p>
+          </div>
+        </div>
+      </UModalHeader>
+
+      <UModalBody>
+        <form @submit.prevent="handleSubmit" class="space-y-4">
+          <!-- Title -->
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-highlighted">
+              Title <span class="text-error">*</span>
+            </label>
+            <UInput
+              v-model="formData.title"
+              placeholder="e.g., Weekly Mentoring Session"
+              :error="!!errors.title"
+              :disabled="loading"
+            />
+            <p v-if="errors.title" class="text-xs text-error">{{ errors.title }}</p>
+          </div>
+
+          <!-- Description -->
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-highlighted">
+              Description <span class="text-muted text-xs">(optional)</span>
+            </label>
+            <UTextarea
+              v-model="formData.description"
+              placeholder="What this meeting covers"
+              :disabled="loading"
+            />
+          </div>
+
+          <!-- Day of week + times -->
+          <div class="grid grid-cols-3 gap-3">
+            <div class="space-y-2">
+              <label class="text-sm font-medium text-highlighted">Day <span class="text-error">*</span></label>
+              <USelect v-model="formData.day_of_week" :items="dayItems" value-key="value" :disabled="loading" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium text-highlighted">Start <span class="text-error">*</span></label>
+              <UInput v-model="formData.start_time" type="time" :error="!!errors.start_time" :disabled="loading" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium text-highlighted">End <span class="text-error">*</span></label>
+              <UInput v-model="formData.end_time" type="time" :error="!!errors.end_time" :disabled="loading" />
+            </div>
+          </div>
+          <p v-if="errors.end_time" class="text-xs text-error">{{ errors.end_time }}</p>
+
+          <!-- Recurrence window -->
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <label class="text-sm font-medium text-highlighted">Starts on</label>
+              <UInput v-model="formData.starts_on" type="date" :disabled="loading" />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium text-highlighted">
+                Ends on <span class="text-muted text-xs">(optional — recurs indefinitely if blank)</span>
+              </label>
+              <UInput v-model="formData.ends_on" type="date" :error="!!errors.ends_on" :disabled="loading" />
+              <p v-if="errors.ends_on" class="text-xs text-error">{{ errors.ends_on }}</p>
+            </div>
+          </div>
+
+          <!-- Meeting link -->
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-highlighted">
+              Meeting Link <span class="text-muted text-xs">(optional)</span>
+            </label>
+            <UInput
+              v-model="formData.meeting_link"
+              placeholder="https://meet.google.com/..."
+              :disabled="loading"
+            />
+          </div>
+
+          <!-- Scope -->
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <label class="text-sm font-medium text-highlighted">
+                Program <span class="text-muted text-xs">(blank = all)</span>
+              </label>
+              <USelect
+                v-model="formData.program_id"
+                :items="[{ label: 'All Programs', value: null }, ...programOptions]"
+                value-key="value"
+                :disabled="loading"
+              />
+            </div>
+            <div class="space-y-2">
+              <label class="text-sm font-medium text-highlighted">
+                Cohort <span class="text-muted text-xs">(blank = all)</span>
+              </label>
+              <USelect
+                v-model="formData.cohort_id"
+                :items="[{ label: 'All Cohorts', value: null }, ...cohortOptions]"
+                value-key="value"
+                :disabled="loading"
+              />
+            </div>
+          </div>
+
+          <!-- Active toggle -->
+          <div class="flex items-center gap-2">
+            <USwitch v-model="formData.is_active" :disabled="loading" />
+            <span class="text-sm text-highlighted">Active (unpins from calendars when off)</span>
+          </div>
+        </form>
+      </UModalBody>
+
+      <UModalFooter>
+        <div class="flex items-center justify-end gap-2">
+          <UButton color="neutral" variant="outline" label="Cancel" @click="handleClose" :disabled="loading" />
+          <UButton
+            color="primary"
+            :label="editingMeeting ? 'Save Changes' : 'Schedule Meeting'"
+            :icon="editingMeeting ? 'i-lucide-check' : 'i-lucide-plus'"
+            @click="handleSubmit"
+            :loading="loading"
+            :disabled="loading"
+          />
+        </div>
+      </UModalFooter>
+    </UModalContent>
+  </UModal>
+</template>

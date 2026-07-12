@@ -1,0 +1,43 @@
+name: Meeting Reminders
+
+on:
+  # Run daily at 6:30 AM UTC — after the data scraper's status pass,
+  # early enough to notify students before their day's meetings.
+  schedule:
+    - cron: '30 6 * * *'
+
+  # Allow manual triggering for testing
+  workflow_dispatch: {}
+
+jobs:
+  send-meeting-reminders:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger meeting reminder notifications
+        run: |
+          echo "🔔 Checking for meetings scheduled today..."
+          RESPONSE=$(curl -s -X POST "${{ secrets.APP_URL }}/api/notifications/meeting-reminders" \
+            -H "Content-Type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP_STATUS:%{http_code}" \
+            --max-time 30)
+
+          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d: -f2)
+          BODY=$(echo "$RESPONSE" | sed '/HTTP_STATUS/d')
+
+          if [ "$HTTP_STATUS" -eq 200 ]; then
+            echo "✅ Meeting reminders processed successfully"
+            echo "$BODY" | jq -r '"📅 \(.meetings_today) meeting(s) today, \(.notifications_sent) notification(s) sent"'
+          else
+            echo "⚠️ Meeting reminders failed with HTTP $HTTP_STATUS"
+            echo "$BODY"
+            exit 1
+          fi
+
+# Required repo secrets:
+#   APP_URL      — the deployed app's base URL (already used by daily-data-scraper.yaml)
+#   CRON_SECRET  — optional shared secret; only required if CRON_SECRET is
+#                  also set as an env var on the deployed app. If neither is
+#                  set, the endpoint accepts requests without it (same
+#                  convention as the existing monitor-status route).

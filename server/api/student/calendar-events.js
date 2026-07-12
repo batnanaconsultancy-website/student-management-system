@@ -1,4 +1,5 @@
 import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import { getOccurrenceDates, occurrenceToEvent } from '~/server/utils/meetingOccurrences'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -13,15 +14,20 @@ export default defineEventHandler(async (event) => {
     const month = query.month !== undefined ? parseInt(query.month) : null
     const year = query.year !== undefined ? parseInt(query.year) : null
 
+    // Calculate time range based on period (with optional month/year for calendar view)
+    const { timeMin, timeMax } = getTimeRange(period, month, year)
+
+    // Admin-scheduled meetings are always fetched and pinned, regardless of
+    // whether the student has connected Google Calendar — RLS scopes the
+    // rows to this student's own program/cohort (or global meetings).
+    const pinnedEvents = await getPinnedMeetingEvents(event, timeMin, timeMax)
+
     // Get the access token from the request headers (passed from client)
     const accessToken = getHeader(event, 'x-google-token')
 
     if (!accessToken) {
-      return { data: [], error: 'No Google access token provided' }
+      return { data: pinnedEvents, error: pinnedEvents.length ? undefined : 'No Google access token provided' }
     }
-
-    // Calculate time range based on period (with optional month/year for calendar view)
-    const { timeMin, timeMax } = getTimeRange(period, month, year)
 
     const res = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(
@@ -37,11 +43,19 @@ export default defineEventHandler(async (event) => {
     if (!res.ok) {
       const errorText = await res.text()
       console.error('Google Calendar API error:', errorText)
-      return { data: [], error: 'Failed to fetch calendar events' }
+      return { data: pinnedEvents, error: 'Failed to fetch calendar events' }
     }
 
     const data = await res.json()
-    return { data: data.items || [] }
+    const googleEvents = data.items || []
+
+    const merged = [...pinnedEvents, ...googleEvents].sort((a, b) => {
+      const aStart = new Date(a.start?.dateTime || a.start?.date).getTime()
+      const bStart = new Date(b.start?.dateTime || b.start?.date).getTime()
+      return aStart - bStart
+    })
+
+    return { data: merged }
   } catch (err) {
     console.error('Calendar events handler error:', err)
     throw createError({
@@ -50,6 +64,35 @@ export default defineEventHandler(async (event) => {
     })
   }
 })
+
+// Fetches active scheduled_meetings visible to this student (RLS-scoped)
+// and expands their weekly recurrence into concrete occurrences within range.
+async function getPinnedMeetingEvents(event, timeMin, timeMax) {
+  try {
+    const supabase = await serverSupabaseClient(event)
+    const { data: meetings, error } = await supabase
+      .from('scheduled_meetings')
+      .select('*')
+      .eq('is_active', true)
+
+    if (error) {
+      console.error('Error fetching scheduled meetings:', error)
+      return []
+    }
+
+    const events = []
+    for (const meeting of meetings || []) {
+      const dates = getOccurrenceDates(meeting, timeMin, timeMax)
+      for (const date of dates) {
+        events.push(occurrenceToEvent(meeting, date))
+      }
+    }
+    return events
+  } catch (err) {
+    console.error('Error building pinned meeting events:', err)
+    return []
+  }
+}
 
 function getTimeRange(period = 'today', month = null, year = null) {
   let timeMin = new Date()
