@@ -118,11 +118,7 @@
 </script>
 
 <template>
-    <UDashboardPanel id="home" 
-    :ui="{
-      body: '2xl:overflow-hidden'
-    }"
-    >
+    <UDashboardPanel id="home">
       <template #header>
           <UDashboardNavbar title="Dashboard" >
               <template #leading>
@@ -167,7 +163,7 @@
 
           <div class="flex gap-8 translate-y-4 xl:translate-y-6">
                  <StudentDashboardStatCard
-                  :value="'90'"
+                  :value="studentData.points ?? 0"
                   label="Earned Points"
                   icon="i-lucide:star"
                 />
@@ -178,13 +174,6 @@
         <UPageGrid class="grid-cols-1 sm:grid-cols-1 lg:grid-cols-2 mt-14 lg:gap-10">
           <div class="flex flex-col gap-1">            
             <StudentDashboardMeetingsDisplay v-if="googleAccessToken" :googleAccessToken="googleAccessToken" />
-
-            <StudentDashboardDeadlinesCard
-              v-if="studentData"
-              :seasonId="studentData.expected_season_id"
-              :programId="studentData.program_id"
-              :cohortId="studentData.cohort_id"
-            />
           </div>
            
            <div class="flex flex-col justify-between 2xl:gap-4">
