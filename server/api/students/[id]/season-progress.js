@@ -1,5 +1,6 @@
 import { createError } from 'h3'
 import { serverSupabaseClient } from '#supabase/server'
+import { isSeasonCompleted } from '~/server/utils/seasonCompletion'
 
 /**
  * GET /api/students/:id/season-progress
@@ -88,7 +89,7 @@ export default defineEventHandler(async (event) => {
         student_id: studentId,
         season_id: season.id,
         progress_percentage: progress?.progress_percentage || 0,
-        is_completed: progress?.is_completed || false,
+        is_completed: isSeasonCompleted(progress?.progress_percentage, progress?.is_completed),
         completion_date: progress?.completion_date || null,
         created_at: progress?.created_at || null,
         updated_at: progress?.updated_at || null,

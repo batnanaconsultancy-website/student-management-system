@@ -21,6 +21,15 @@ from utils import (
     safe_upsert, safe_update, print_step, safe_print
 )
 
+# University policy: a season/program counts as "Completed" (rather than
+# "In Progress") once the student reaches this percentage, and the
+# student's "current season" advances to the next one at that point too.
+# This is the single source of truth for the whole system -- everything
+# downstream (roadmap page, admin season progress table, dashboards,
+# status calculations) reads the is_completed / current_season_id values
+# this script writes to the database.
+SEASON_COMPLETION_THRESHOLD_PCT = 75
+
 class QwasarScraper:
     """Handles web scraping from Qwasar platform"""
     
@@ -697,7 +706,8 @@ class StudentDataProcessor:
                                     progress_value = float(progress_str)
 
                                 # Keep updating to the latest season that's not completed
-                                if progress_value < 100:
+                                # (per university policy, "completed" means >= 75%, not 100%)
+                                if progress_value < SEASON_COMPLETION_THRESHOLD_PCT:
                                     current_season_name = season_name
                             except (ValueError, TypeError):
                                 # If we can't parse, still consider it as potential current season
@@ -707,7 +717,7 @@ class StudentDataProcessor:
                         # If no season < 100% was found, use the last season in the list
                         if not current_season_name and last_season_name:
                             current_season_name = last_season_name
-                            print(f"All seasons 100% complete for {username}, using last season: {current_season_name}")
+                            print(f"All seasons >= {SEASON_COMPLETION_THRESHOLD_PCT}% complete for {username}, using last season: {current_season_name}")
 
                         # Map and set current season
                         if current_season_name:
@@ -816,9 +826,9 @@ class StudentDataProcessor:
                     "student_id": student_id,
                     "season_id": season_id,
                     "progress_percentage": completion_percentage,
-                    "is_completed": completion_percentage >= 100,
-                    # "completion_date": datetime.now().date().isoformat() if completion_percentage >= 100 else None,
-                    "updated_at": datetime.now().isoformat() if completion_percentage >= 100 else None,
+                    "is_completed": completion_percentage >= SEASON_COMPLETION_THRESHOLD_PCT,
+                    # "completion_date": datetime.now().date().isoformat() if completion_percentage >= SEASON_COMPLETION_THRESHOLD_PCT else None,
+                    "updated_at": datetime.now().isoformat() if completion_percentage >= SEASON_COMPLETION_THRESHOLD_PCT else None,
                 }
 
                 key = (student_id, season_id)

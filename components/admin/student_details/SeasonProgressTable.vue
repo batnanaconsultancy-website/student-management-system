@@ -123,7 +123,7 @@ const data = computed<SeasonProgress[]>(() => {
           variants.reduce((sum, v) => sum + v.progress_percentage, 0) / variants.length
         )
 
-        const status = avgProgress >= 70
+        const status = avgProgress >= 75
           ? 'Completed'
           : avgProgress > 0
           ? 'On Going'

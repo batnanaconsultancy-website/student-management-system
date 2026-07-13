@@ -1,4 +1,5 @@
 import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import { isSeasonCompleted } from '~/server/utils/seasonCompletion'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -63,7 +64,7 @@ export default defineEventHandler(async (event) => {
       season_id: item.season_id,
       season_name: item.seasons?.name || 'Unknown Season',
       progress_percentage: Math.round(parseFloat(item.progress_percentage)),
-      is_completed: item.is_completed
+      is_completed: isSeasonCompleted(item.progress_percentage, item.is_completed)
     }))
 
     // Fetch all seasons for the student's program
@@ -87,12 +88,8 @@ export default defineEventHandler(async (event) => {
       return true
     })
 
-    // Count completed seasons
-    const { data: completedSeasonsData } = await client
-      .from('student_season_progress')
-      .select('season_id')
-      .eq('student_id', studentData.id)
-      .eq('is_completed', true)
+    // Count completed seasons (using the same 75%-or-flagged rule as everywhere else)
+    const completedSeasonsCount = seasonProgress.filter(sp => sp.is_completed).length
 
     return {
       data: {
@@ -105,7 +102,7 @@ export default defineEventHandler(async (event) => {
         all_program_seasons: programSeasons || [],
         filtered_seasons: filteredSeasons,
         total_seasons: filteredSeasons.length,
-        completed_seasons: completedSeasonsData?.length || 0
+        completed_seasons: completedSeasonsCount
       }
     }
   } catch (err) {
