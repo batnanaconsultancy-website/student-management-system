@@ -161,6 +161,24 @@
                   ]"
                   :style="getItemStyle(item)"
                 >
+                  <!-- Start pin (skip if this segment continues from a previous month) -->
+                  <div
+                    v-if="!item.title?.includes('(cont.)')"
+                    class="absolute -top-5 left-0 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm"
+                    :style="{ backgroundColor: item.seasonColor || 'var(--color-primary-500)' }"
+                  >
+                    <UIcon name="i-lucide-pin" class="size-2.5" />
+                    Start
+                  </div>
+                  <!-- End pin (skip if this segment continues into the next month) -->
+                  <div
+                    v-if="!item.crossMonth"
+                    class="absolute -top-5 right-0 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white shadow-sm"
+                    :style="{ backgroundColor: item.seasonColor || 'var(--color-primary-500)' }"
+                  >
+                    <UIcon name="i-lucide-pin" class="size-2.5" />
+                    End
+                  </div>
                   <div class="flex min-w-0 flex-1 items-center gap-3">
                     <!-- Season color indicator -->
                     <div
