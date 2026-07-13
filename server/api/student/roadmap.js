@@ -88,6 +88,11 @@ export default defineEventHandler(async (event) => {
       return true
     })
 
+    // Programs are marked "Completed" on the roadmap once a student has
+    // reached 75% progress or above, even if the scraped completion flag
+    // hasn't caught up yet (per university policy).
+    const COMPLETION_THRESHOLD = 75
+
     // Map seasons with progress and projects
     const seasons = filteredSeasons.map((season) => {
       const progress = (progressData || []).find(p => p.season_id === season.season_id)
@@ -100,11 +105,14 @@ export default defineEventHandler(async (event) => {
           is_completed: completedProjectIds.has(project.id)
         }))
 
+      const progressPercentage = parseFloat(progress?.progress_percentage || '0.00')
+      const isCompleted = Boolean(progress?.is_completed) || progressPercentage >= COMPLETION_THRESHOLD
+
       return {
         ...season,
         name: season.seasons?.name || 'Season',
         progress_percentage: progress?.progress_percentage || '0.00',
-        is_completed: progress?.is_completed || false,
+        is_completed: isCompleted,
         completion_date: progress?.completion_date || null,
         projects: seasonProjects
       }
