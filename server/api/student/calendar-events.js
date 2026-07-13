@@ -17,10 +17,16 @@ export default defineEventHandler(async (event) => {
     // Calculate time range based on period (with optional month/year for calendar view)
     const { timeMin, timeMax } = getTimeRange(period, month, year)
 
-    // Admin-scheduled meetings are always fetched and pinned, regardless of
-    // whether the student has connected Google Calendar — RLS scopes the
-    // rows to this student's own program/cohort (or global meetings).
+    // Only admin-scheduled meetings are shown on the student calendar —
+    // personal Google Calendar events are intentionally NOT merged in here.
+    // (Google Calendar sync code is left in place below, disabled, in case
+    // it's wanted again later — see ENABLE_GOOGLE_CALENDAR_SYNC.)
     const pinnedEvents = await getPinnedMeetingEvents(event, timeMin, timeMax)
+
+    const ENABLE_GOOGLE_CALENDAR_SYNC = false
+    if (!ENABLE_GOOGLE_CALENDAR_SYNC) {
+      return { data: pinnedEvents }
+    }
 
     // Get the access token from the request headers (passed from client)
     const accessToken = getHeader(event, 'x-google-token')
