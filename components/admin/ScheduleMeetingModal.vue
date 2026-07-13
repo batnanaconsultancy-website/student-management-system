@@ -119,142 +119,161 @@ function handleClose() {
 </script>
 
 <template>
-  <UModal :open="isOpen" @update:open="emit('update:isOpen', $event)" @close="handleClose">
-    <UModalContent>
-      <UModalHeader>
-        <div class="flex items-center gap-3">
-          <div class="bg-primary/10 border-primary flex h-10 w-10 items-center justify-center rounded-full border">
-            <UIcon name="i-lucide-calendar-plus" class="text-primary size-5" />
-          </div>
-          <div>
-            <h2 class="text-lg font-semibold text-highlighted">
-              {{ editingMeeting ? 'Edit Scheduled Meeting' : 'Schedule Weekly Meeting' }}
-            </h2>
-            <p class="text-sm text-muted">Pins automatically to every matching student's calendar</p>
-          </div>
+  <UModal
+    :open="isOpen"
+    @update:open="emit('update:isOpen', $event)"
+    @close="handleClose"
+    :ui="{ content: 'max-w-lg' }"
+  >
+    <template #header="{ close }">
+      <div class="flex items-center gap-3 flex-1">
+        <div class="bg-primary/10 border-primary flex h-10 w-10 items-center justify-center rounded-full border">
+          <UIcon name="i-lucide-calendar-plus" class="text-primary size-5" />
         </div>
-      </UModalHeader>
+        <div>
+          <h2 class="text-lg font-semibold text-highlighted">
+            {{ editingMeeting ? 'Edit Scheduled Meeting' : 'Schedule Weekly Meeting' }}
+          </h2>
+          <p class="text-sm text-muted">Pins automatically to every matching student's calendar</p>
+        </div>
+      </div>
+      <UButton
+        icon="i-lucide-x"
+        color="neutral"
+        variant="ghost"
+        aria-label="Close"
+        @click="close"
+      />
+    </template>
 
-      <UModalBody>
-        <form @submit.prevent="handleSubmit" class="space-y-4">
-          <!-- Title -->
-          <div class="space-y-2">
-            <label class="text-sm font-medium text-highlighted">
-              Title <span class="text-error">*</span>
-            </label>
-            <UInput
-              v-model="formData.title"
-              placeholder="e.g., Weekly Mentoring Session"
-              :error="!!errors.title"
-              :disabled="loading"
-              @keydown.stop
-            />
-            <p v-if="errors.title" class="text-xs text-error">{{ errors.title }}</p>
-          </div>
+    <template #body>
+      <form @submit.prevent="handleSubmit" class="space-y-4">
+        <!-- Title -->
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-highlighted">
+            Title <span class="text-error">*</span>
+          </label>
+          <UInput
+            v-model="formData.title"
+            placeholder="e.g., Weekly Mentoring Session"
+            :error="!!errors.title"
+            :disabled="loading"
+          />
+          <p v-if="errors.title" class="text-xs text-error">{{ errors.title }}</p>
+        </div>
 
-          <!-- Description -->
-          <div class="space-y-2">
-            <label class="text-sm font-medium text-highlighted">
-              Description <span class="text-muted text-xs">(optional)</span>
-            </label>
-            <UTextarea
-              v-model="formData.description"
-              placeholder="What this meeting covers"
-              :disabled="loading"
-              @keydown.stop
-            />
-          </div>
-
-          <!-- Day of week + times -->
-          <div class="grid grid-cols-3 gap-3">
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-highlighted">Day <span class="text-error">*</span></label>
-              <USelect v-model="dayOfWeekStr" :items="dayItems" :disabled="loading" />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-highlighted">Start <span class="text-error">*</span></label>
-              <UInput v-model="formData.start_time" type="time" :error="!!errors.start_time" :disabled="loading" @keydown.stop />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-highlighted">End <span class="text-error">*</span></label>
-              <UInput v-model="formData.end_time" type="time" :error="!!errors.end_time" :disabled="loading" @keydown.stop />
-            </div>
-          </div>
-          <p v-if="errors.end_time" class="text-xs text-error">{{ errors.end_time }}</p>
-
-          <!-- Recurrence window -->
-          <div class="grid grid-cols-2 gap-3">
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-highlighted">Starts on</label>
-              <UInput v-model="formData.starts_on" type="date" :disabled="loading" @keydown.stop />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-highlighted">
-                Ends on <span class="text-muted text-xs">(optional — recurs indefinitely if blank)</span>
-              </label>
-              <UInput v-model="formData.ends_on" type="date" :error="!!errors.ends_on" :disabled="loading" @keydown.stop />
-              <p v-if="errors.ends_on" class="text-xs text-error">{{ errors.ends_on }}</p>
-            </div>
-          </div>
-
-          <!-- Meeting link -->
-          <div class="space-y-2">
-            <label class="text-sm font-medium text-highlighted">
-              Meeting Link <span class="text-muted text-xs">(optional)</span>
-            </label>
-            <UInput
-              v-model="formData.meeting_link"
-              placeholder="https://meet.google.com/..."
-              :disabled="loading"
-              @keydown.stop
-            />
-          </div>
-
-          <!-- Scope -->
-          <div class="grid grid-cols-2 gap-3">
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-highlighted">
-                Program <span class="text-muted text-xs">(blank = all)</span>
-              </label>
-              <USelect
-                v-model="formData.program_id"
-                :items="[{ label: 'All Programs', value: 'all' }, ...programOptions]"
-                :disabled="loading"
-              />
-            </div>
-            <div class="space-y-2">
-              <label class="text-sm font-medium text-highlighted">
-                Cohort <span class="text-muted text-xs">(blank = all)</span>
-              </label>
-              <USelect
-                v-model="formData.cohort_id"
-                :items="[{ label: 'All Cohorts', value: 'all' }, ...cohortOptions]"
-                :disabled="loading"
-              />
-            </div>
-          </div>
-
-          <!-- Active toggle -->
-          <div class="flex items-center gap-2">
-            <USwitch v-model="formData.is_active" :disabled="loading" />
-            <span class="text-sm text-highlighted">Active (unpins from calendars when off)</span>
-          </div>
-        </form>
-      </UModalBody>
-
-      <UModalFooter>
-        <div class="flex items-center justify-end gap-2">
-          <UButton color="neutral" variant="outline" label="Cancel" @click="handleClose" :disabled="loading" />
-          <UButton
-            color="primary"
-            :label="editingMeeting ? 'Save Changes' : 'Schedule Meeting'"
-            :icon="editingMeeting ? 'i-lucide-check' : 'i-lucide-plus'"
-            @click="handleSubmit"
-            :loading="loading"
+        <!-- Description -->
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-highlighted">
+            Description <span class="text-muted text-xs">(optional)</span>
+          </label>
+          <UTextarea
+            v-model="formData.description"
+            placeholder="What this meeting covers"
             :disabled="loading"
           />
         </div>
-      </UModalFooter>
-    </UModalContent>
+
+        <!-- Day of week + times -->
+        <div class="grid grid-cols-3 gap-3">
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-highlighted">Day <span class="text-error">*</span></label>
+            <select
+              v-model="dayOfWeekStr"
+              :disabled="loading"
+              class="w-full rounded-md border-0 appearance-none px-2.5 py-1.5 text-sm text-highlighted bg-default ring ring-inset ring-accented focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-75"
+            >
+              <option v-for="d in dayItems" :key="d.value" :value="d.value">{{ d.label }}</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-highlighted">Start <span class="text-error">*</span></label>
+            <UInput v-model="formData.start_time" type="time" :error="!!errors.start_time" :disabled="loading" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-highlighted">End <span class="text-error">*</span></label>
+            <UInput v-model="formData.end_time" type="time" :error="!!errors.end_time" :disabled="loading" />
+          </div>
+        </div>
+        <p v-if="errors.end_time" class="text-xs text-error">{{ errors.end_time }}</p>
+
+        <!-- Recurrence window -->
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-highlighted">Starts on</label>
+            <UInput v-model="formData.starts_on" type="date" :disabled="loading" />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-highlighted">
+              Ends on <span class="text-muted text-xs">(optional — recurs indefinitely if blank)</span>
+            </label>
+            <UInput v-model="formData.ends_on" type="date" :error="!!errors.ends_on" :disabled="loading" />
+            <p v-if="errors.ends_on" class="text-xs text-error">{{ errors.ends_on }}</p>
+          </div>
+        </div>
+
+        <!-- Meeting link -->
+        <div class="space-y-2">
+          <label class="text-sm font-medium text-highlighted">
+            Meeting Link <span class="text-muted text-xs">(optional)</span>
+          </label>
+          <UInput
+            v-model="formData.meeting_link"
+            placeholder="https://meet.google.com/..."
+            :disabled="loading"
+          />
+        </div>
+
+        <!-- Scope -->
+        <div class="grid grid-cols-2 gap-3">
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-highlighted">
+              Program <span class="text-muted text-xs">(blank = all)</span>
+            </label>
+            <select
+              v-model="formData.program_id"
+              :disabled="loading"
+              class="w-full rounded-md border-0 appearance-none px-2.5 py-1.5 text-sm text-highlighted bg-default ring ring-inset ring-accented focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-75"
+            >
+              <option value="all">All Programs</option>
+              <option v-for="p in programOptions" :key="p.value" :value="p.value">{{ p.label }}</option>
+            </select>
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-highlighted">
+              Cohort <span class="text-muted text-xs">(blank = all)</span>
+            </label>
+            <select
+              v-model="formData.cohort_id"
+              :disabled="loading"
+              class="w-full rounded-md border-0 appearance-none px-2.5 py-1.5 text-sm text-highlighted bg-default ring ring-inset ring-accented focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-75"
+            >
+              <option value="all">All Cohorts</option>
+              <option v-for="c in cohortOptions" :key="c.value" :value="c.value">{{ c.label }}</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Active toggle -->
+        <div class="flex items-center gap-2">
+          <USwitch v-model="formData.is_active" :disabled="loading" />
+          <span class="text-sm text-highlighted">Active (unpins from calendars when off)</span>
+        </div>
+      </form>
+    </template>
+
+    <template #footer>
+      <div class="flex items-center justify-end gap-2 w-full">
+        <UButton color="neutral" variant="outline" label="Cancel" @click="handleClose" :disabled="loading" />
+        <UButton
+          color="primary"
+          :label="editingMeeting ? 'Save Changes' : 'Schedule Meeting'"
+          :icon="editingMeeting ? 'i-lucide-check' : 'i-lucide-plus'"
+          @click="handleSubmit"
+          :loading="loading"
+          :disabled="loading"
+        />
+      </div>
+    </template>
   </UModal>
 </template>
