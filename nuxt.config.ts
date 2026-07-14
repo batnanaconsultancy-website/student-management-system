@@ -20,15 +20,6 @@ export default defineNuxtConfig({
   plugins: [],
   css: ["~/assets/css/main.css"],
 
-  // ✅ ADD THIS SECTION
-  nitro: {
-    preset: "vercel",
-    externals: {
-      // Force googleapis to be bundled instead of treated as external
-      inline: ["googleapis"],
-    },
-  },
-
   supabase: {
     url: process.env.NUXT_PUBLIC_SUPABASE_URL,
     key: process.env.NUXT_PUBLIC_SUPABASE_KEY,

@@ -1,6 +1,6 @@
 import { createError } from "h3";
 import { serverSupabaseClient } from "#supabase/server";
-import { google } from "googleapis";
+
 // Map program name variations to database names
 const programNameMap = {
   "AI and Machine Learning": "AI/ML",
