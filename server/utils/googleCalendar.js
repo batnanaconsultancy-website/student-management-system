@@ -28,53 +28,62 @@
 // remove in the app's own database always succeeds regardless of whether
 // Google sync is set up, so this feature can be turned on incrementally.
 
-import { google } from 'googleapis'
+// import { google } from 'googleapis'
 
-const DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
+const DAY_CODES = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 
 function getConfig() {
-  const config = useRuntimeConfig()
+  const config = useRuntimeConfig();
   return {
     calendarId: config.public?.googleCalendarId,
     serviceAccountEmail: config.googleCalendarServiceAccountEmail,
     // Private keys stored in env vars usually have literal "\n" sequences
     // instead of real newlines -- restore them or the JWT signer rejects the key.
-    privateKey: config.googleCalendarServiceAccountPrivateKey?.replace(/\\n/g, '\n'),
-    timezone: config.googleCalendarTimezone || 'UTC',
-  }
+    privateKey: config.googleCalendarServiceAccountPrivateKey?.replace(
+      /\\n/g,
+      "\n",
+    ),
+    timezone: config.googleCalendarTimezone || "UTC",
+  };
 }
 
 function isConfigured(cfg) {
-  return Boolean(cfg.calendarId && cfg.serviceAccountEmail && cfg.privateKey)
+  return Boolean(cfg.calendarId && cfg.serviceAccountEmail && cfg.privateKey);
 }
 
-let cachedClient = null
+let cachedClient = null;
 function getCalendarClient(cfg) {
-  if (cachedClient) return cachedClient
+  if (cachedClient) return cachedClient;
 
   const auth = new google.auth.JWT({
     email: cfg.serviceAccountEmail,
     key: cfg.privateKey,
-    scopes: ['https://www.googleapis.com/auth/calendar'],
-  })
+    scopes: ["https://www.googleapis.com/auth/calendar"],
+  });
 
-  cachedClient = google.calendar({ version: 'v3', auth })
-  return cachedClient
+  cachedClient = google.calendar({ version: "v3", auth });
+  return cachedClient;
 }
 
 function buildRRule(meeting) {
-  const parts = [`FREQ=WEEKLY`, `BYDAY=${DAY_CODES[meeting.day_of_week]}`]
+  const parts = [`FREQ=WEEKLY`, `BYDAY=${DAY_CODES[meeting.day_of_week]}`];
   if (meeting.ends_on) {
     // RRULE UNTIL wants a bare date/time in UTC basic format (YYYYMMDD).
-    const until = String(meeting.ends_on).replace(/-/g, '')
-    parts.push(`UNTIL=${until}T235959Z`)
+    const until = String(meeting.ends_on).replace(/-/g, "");
+    parts.push(`UNTIL=${until}T235959Z`);
   }
-  return `RRULE:${parts.join(';')}`
+  return `RRULE:${parts.join(";")}`;
 }
 
 function buildEventPayload(meeting, timezone) {
-  const startTime = meeting.start_time?.length === 5 ? `${meeting.start_time}:00` : meeting.start_time
-  const endTime = meeting.end_time?.length === 5 ? `${meeting.end_time}:00` : meeting.end_time
+  const startTime =
+    meeting.start_time?.length === 5
+      ? `${meeting.start_time}:00`
+      : meeting.start_time;
+  const endTime =
+    meeting.end_time?.length === 5
+      ? `${meeting.end_time}:00`
+      : meeting.end_time;
 
   const payload = {
     summary: meeting.title,
@@ -88,12 +97,12 @@ function buildEventPayload(meeting, timezone) {
       timeZone: timezone,
     },
     recurrence: [buildRRule(meeting)],
-  }
+  };
 
   if (meeting.meeting_link) {
     // Admin provided their own link (Zoom, an existing Meet room, etc.) --
     // respect it, don't generate a competing Google Meet link.
-    payload.location = meeting.meeting_link
+    payload.location = meeting.meeting_link;
   } else {
     // No link provided -- ask Google to generate a real Google Meet link
     // as part of creating/updating this event. Requires
@@ -101,12 +110,12 @@ function buildEventPayload(meeting, timezone) {
     payload.conferenceData = {
       createRequest: {
         requestId: `meet-${meeting.id}-${Date.now()}`,
-        conferenceSolutionKey: { type: 'hangoutsMeet' },
+        conferenceSolutionKey: { type: "hangoutsMeet" },
       },
-    }
+    };
   }
 
-  return payload
+  return payload;
 }
 
 /**
@@ -120,28 +129,35 @@ function buildEventPayload(meeting, timezone) {
  * already supplied their own link, or if sync isn't configured / fails).
  */
 export async function createSharedCalendarEvent(meeting) {
-  const cfg = getConfig()
+  const cfg = getConfig();
   if (!isConfigured(cfg)) {
-    console.warn('[googleCalendar] Not configured -- skipping calendar sync for meeting', meeting.id)
-    return { eventId: null, meetingLink: null }
+    console.warn(
+      "[googleCalendar] Not configured -- skipping calendar sync for meeting",
+      meeting.id,
+    );
+    return { eventId: null, meetingLink: null };
   }
 
-  const needsGeneratedLink = !meeting.meeting_link
+  const needsGeneratedLink = !meeting.meeting_link;
 
   try {
-    const calendar = getCalendarClient(cfg)
+    const calendar = getCalendarClient(cfg);
     const res = await calendar.events.insert({
       calendarId: cfg.calendarId,
       conferenceDataVersion: needsGeneratedLink ? 1 : undefined,
       requestBody: buildEventPayload(meeting, cfg.timezone),
-    })
+    });
     return {
       eventId: res.data.id,
-      meetingLink: needsGeneratedLink ? (res.data.hangoutLink || null) : null,
-    }
+      meetingLink: needsGeneratedLink ? res.data.hangoutLink || null : null,
+    };
   } catch (err) {
-    console.error('[googleCalendar] Failed to create event for meeting', meeting.id, err?.message || err)
-    return { eventId: null, meetingLink: null }
+    console.error(
+      "[googleCalendar] Failed to create event for meeting",
+      meeting.id,
+      err?.message || err,
+    );
+    return { eventId: null, meetingLink: null };
   }
 }
 
@@ -155,38 +171,48 @@ export async function createSharedCalendarEvent(meeting) {
  * Returns { eventId, meetingLink }, same shape as createSharedCalendarEvent.
  */
 export async function updateSharedCalendarEvent(meeting) {
-  const cfg = getConfig()
+  const cfg = getConfig();
   if (!isConfigured(cfg)) {
-    console.warn('[googleCalendar] Not configured -- skipping calendar sync for meeting', meeting.id)
-    return { eventId: null, meetingLink: null }
+    console.warn(
+      "[googleCalendar] Not configured -- skipping calendar sync for meeting",
+      meeting.id,
+    );
+    return { eventId: null, meetingLink: null };
   }
 
   if (!meeting.google_event_id) {
-    return createSharedCalendarEvent(meeting)
+    return createSharedCalendarEvent(meeting);
   }
 
-  const needsGeneratedLink = !meeting.meeting_link
+  const needsGeneratedLink = !meeting.meeting_link;
 
   try {
-    const calendar = getCalendarClient(cfg)
+    const calendar = getCalendarClient(cfg);
     const res = await calendar.events.patch({
       calendarId: cfg.calendarId,
       eventId: meeting.google_event_id,
       conferenceDataVersion: needsGeneratedLink ? 1 : undefined,
       requestBody: buildEventPayload(meeting, cfg.timezone),
-    })
+    });
     return {
       eventId: res.data.id,
-      meetingLink: needsGeneratedLink ? (res.data.hangoutLink || null) : null,
-    }
+      meetingLink: needsGeneratedLink ? res.data.hangoutLink || null : null,
+    };
   } catch (err) {
     // If the event was deleted out-of-band, fall back to creating a fresh one.
     if (err?.code === 404 || err?.response?.status === 404) {
-      console.warn('[googleCalendar] Event missing on Google, recreating for meeting', meeting.id)
-      return createSharedCalendarEvent(meeting)
+      console.warn(
+        "[googleCalendar] Event missing on Google, recreating for meeting",
+        meeting.id,
+      );
+      return createSharedCalendarEvent(meeting);
     }
-    console.error('[googleCalendar] Failed to update event for meeting', meeting.id, err?.message || err)
-    return { eventId: meeting.google_event_id, meetingLink: null }
+    console.error(
+      "[googleCalendar] Failed to update event for meeting",
+      meeting.id,
+      err?.message || err,
+    );
+    return { eventId: meeting.google_event_id, meetingLink: null };
   }
 }
 
@@ -203,22 +229,26 @@ export async function updateSharedCalendarEvent(meeting) {
  * Google returns a 409 and we treat that as success.
  */
 export async function shareCalendarWithEmail(email) {
-  const cfg = getConfig()
-  if (!isConfigured(cfg) || !email) return
+  const cfg = getConfig();
+  if (!isConfigured(cfg) || !email) return;
 
   try {
-    const calendar = getCalendarClient(cfg)
+    const calendar = getCalendarClient(cfg);
     await calendar.acl.insert({
       calendarId: cfg.calendarId,
       requestBody: {
-        role: 'reader',
-        scope: { type: 'user', value: email },
+        role: "reader",
+        scope: { type: "user", value: email },
       },
-    })
+    });
   } catch (err) {
-    const status = err?.code || err?.response?.status
-    if (status === 409) return // already shared -- fine
-    console.error('[googleCalendar] Failed to share calendar with', email, err?.message || err)
+    const status = err?.code || err?.response?.status;
+    if (status === 409) return; // already shared -- fine
+    console.error(
+      "[googleCalendar] Failed to share calendar with",
+      email,
+      err?.message || err,
+    );
   }
 }
 
@@ -227,20 +257,29 @@ export async function shareCalendarWithEmail(email) {
  * even if the event is already gone.
  */
 export async function deleteSharedCalendarEvent(googleEventId) {
-  const cfg = getConfig()
-  if (!isConfigured(cfg) || !googleEventId) return
+  const cfg = getConfig();
+  if (!isConfigured(cfg) || !googleEventId) return;
 
   try {
-    const calendar = getCalendarClient(cfg)
+    const calendar = getCalendarClient(cfg);
     await calendar.events.delete({
       calendarId: cfg.calendarId,
       eventId: googleEventId,
-    })
+    });
   } catch (err) {
     // Already deleted or never existed -- not an error worth surfacing.
-    if (err?.code === 404 || err?.response?.status === 404 || err?.code === 410 || err?.response?.status === 410) {
-      return
+    if (
+      err?.code === 404 ||
+      err?.response?.status === 404 ||
+      err?.code === 410 ||
+      err?.response?.status === 410
+    ) {
+      return;
     }
-    console.error('[googleCalendar] Failed to delete event', googleEventId, err?.message || err)
+    console.error(
+      "[googleCalendar] Failed to delete event",
+      googleEventId,
+      err?.message || err,
+    );
   }
 }
