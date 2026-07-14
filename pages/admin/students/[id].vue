@@ -17,9 +17,12 @@ const {
   fetchAllStudentData
 } = useStudentDetails()
 
-// Fetch all data when component mounts
+// Fetch all data when component mounts. Always force a fresh fetch --
+// this page exists so admins can check a student's *current* standing,
+// so silently serving a stale in-memory cache (which has no expiry and
+// nothing else invalidates) would be actively misleading.
 onMounted(async () => {
-  await fetchAllStudentData(studentId)
+  await fetchAllStudentData(studentId, true)
 })
 
 const handleSendEmail = (student) => {
@@ -102,7 +105,7 @@ const handleSendSlackMessage = (student) => {
               <div class="text-red-500 text-4xl">⚠️</div>
               <h3 class="text-lg font-semibold">Error Loading Student</h3>
               <p class="text-muted text-sm">{{ error }}</p>
-              <UButton @click="fetchAllStudentData(studentId)" variant="outline">
+              <UButton @click="fetchAllStudentData(studentId, true)" variant="outline">
                 Try Again
               </UButton>
             </div>
