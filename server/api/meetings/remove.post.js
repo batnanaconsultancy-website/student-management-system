@@ -2,6 +2,7 @@
 // POST /api/meetings/remove
 // Body: { id }
 import { writeAuditLog } from '~/server/utils/auditLog'
+import { deleteSharedCalendarEvent } from '~/server/utils/googleCalendar'
 import { createError } from 'h3'
 import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
 
@@ -30,6 +31,12 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'id is required' })
   }
 
+  const { data: existing } = await supabase
+    .from('scheduled_meetings')
+    .select('google_event_id')
+    .eq('id', id)
+    .maybeSingle()
+
   const { error } = await supabase
     .from('scheduled_meetings')
     .delete()
@@ -37,6 +44,10 @@ export default defineEventHandler(async (event) => {
 
   if (error) {
     throw createError({ statusCode: 500, statusMessage: error.message })
+  }
+
+  if (existing?.google_event_id) {
+    await deleteSharedCalendarEvent(existing.google_event_id)
   }
 
   await writeAuditLog(supabase, user.email, 'delete_scheduled_meeting', 'scheduled_meeting', id, {}, event)

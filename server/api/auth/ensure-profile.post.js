@@ -1,5 +1,6 @@
 import { createError } from "h3";
 import { serverSupabaseClient, serverSupabaseUser } from "#supabase/server";
+import { shareCalendarWithEmail } from "~/server/utils/googleCalendar";
 
 export default defineEventHandler(async (event) => {
   try {
@@ -27,6 +28,14 @@ export default defineEventHandler(async (event) => {
     const role = adminRecord && !adminError ? "admin" : "user";
 
     console.log("Role determined:", role);
+
+    // Fire-and-forget: make sure this person's Google account has access
+    // to the shared meetings calendar. Cheap/idempotent (a no-op if they
+    // already have access), and never blocks or fails the login/role
+    // check if Google isn't reachable or isn't configured yet.
+    shareCalendarWithEmail(user.email).catch((err) => {
+      console.error("Calendar share failed for", user.email, err?.message || err);
+    });
 
     return {
       success: true,

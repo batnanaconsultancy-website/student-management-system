@@ -2,6 +2,7 @@
 // POST /api/meetings/update
 // Body: { id, ...any of the create.post.js fields }
 import { writeAuditLog } from '~/server/utils/auditLog'
+import { updateSharedCalendarEvent, deleteSharedCalendarEvent } from '~/server/utils/googleCalendar'
 import { createError } from 'h3'
 import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
 
@@ -64,6 +65,43 @@ export default defineEventHandler(async (event) => {
 
   if (error) {
     throw createError({ statusCode: 500, statusMessage: error.message })
+  }
+
+  // Sync to the shared Google Calendar. Deactivating a meeting removes it
+  // from the calendar entirely (students no longer see it in-app either,
+  // so it shouldn't linger on their Google Calendar). Any other edit
+  // (time, title, recurrence, link, or reactivating) updates/recreates it.
+  if (updates.is_active === false) {
+    if (data.google_event_id) {
+      await deleteSharedCalendarEvent(data.google_event_id)
+      const { error: syncError } = await supabase
+        .from('scheduled_meetings')
+        .update({ google_event_id: null })
+        .eq('id', id)
+      if (syncError) {
+        console.error('Failed to clear google_event_id for meeting', id, syncError)
+      } else {
+        data.google_event_id = null
+      }
+    }
+  } else {
+    const { eventId: googleEventId, meetingLink: generatedMeetingLink } = await updateSharedCalendarEvent(data)
+    if (googleEventId) {
+      const syncUpdates = {}
+      if (googleEventId !== data.google_event_id) syncUpdates.google_event_id = googleEventId
+      if (generatedMeetingLink && !data.meeting_link) syncUpdates.meeting_link = generatedMeetingLink
+      if (Object.keys(syncUpdates).length > 0) {
+        const { error: syncError } = await supabase
+          .from('scheduled_meetings')
+          .update(syncUpdates)
+          .eq('id', id)
+        if (syncError) {
+          console.error('Failed to store google_event_id for meeting', id, syncError)
+        } else {
+          Object.assign(data, syncUpdates)
+        }
+      }
+    }
   }
 
   await writeAuditLog(supabase, user.email, 'update_scheduled_meeting', 'scheduled_meeting', id, updates, event)

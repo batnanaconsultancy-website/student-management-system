@@ -215,11 +215,11 @@ function handleClose() {
         <!-- Meeting link -->
         <div class="space-y-2">
           <label class="text-sm font-medium text-highlighted">
-            Meeting Link <span class="text-muted text-xs">(optional)</span>
+            Meeting Link <span class="text-muted text-xs">(optional -- leave blank to auto-generate a Google Meet link)</span>
           </label>
           <UInput
             v-model="formData.meeting_link"
-            placeholder="https://meet.google.com/..."
+            placeholder="Leave blank for an auto-generated Google Meet link"
             :disabled="loading"
           />
         </div>

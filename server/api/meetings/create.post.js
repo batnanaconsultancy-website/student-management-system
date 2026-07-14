@@ -3,6 +3,7 @@
 // Body: { title, description?, meeting_link?, day_of_week, start_time, end_time,
 //         starts_on?, ends_on?, program_id?, cohort_id?, is_active? }
 import { writeAuditLog } from '~/server/utils/auditLog'
+import { createSharedCalendarEvent } from '~/server/utils/googleCalendar'
 import { createError } from 'h3'
 import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
 
@@ -74,6 +75,29 @@ export default defineEventHandler(async (event) => {
 
   if (error) {
     throw createError({ statusCode: 500, statusMessage: error.message })
+  }
+
+  // Sync to the shared Google Calendar. If this fails or isn't configured,
+  // the meeting still exists in the app -- we don't fail the whole request
+  // over a calendar sync issue, just log it and move on without the ID.
+  // If no meeting_link was given, Google may have generated a Meet link --
+  // store that back too so it shows up in the app and stays attached to
+  // this meeting for future edits.
+  const { eventId: googleEventId, meetingLink: generatedMeetingLink } = await createSharedCalendarEvent(data)
+  if (googleEventId) {
+    const syncUpdates = { google_event_id: googleEventId }
+    if (generatedMeetingLink) {
+      syncUpdates.meeting_link = generatedMeetingLink
+    }
+    const { error: syncError } = await supabase
+      .from('scheduled_meetings')
+      .update(syncUpdates)
+      .eq('id', data.id)
+    if (syncError) {
+      console.error('Failed to store google_event_id for meeting', data.id, syncError)
+    } else {
+      Object.assign(data, syncUpdates)
+    }
   }
 
   await writeAuditLog(supabase, user.email, 'create_scheduled_meeting', 'scheduled_meeting', data.id,

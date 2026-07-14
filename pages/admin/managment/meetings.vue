@@ -124,6 +124,15 @@ function formatTime(t: string) {
             <td class="px-4 py-3">
               <p class="font-medium text-highlighted">{{ meeting.title }}</p>
               <p v-if="meeting.description" class="text-xs text-muted mt-0.5">{{ meeting.description }}</p>
+              <a
+                v-if="meeting.meeting_link"
+                :href="meeting.meeting_link"
+                target="_blank"
+                class="text-xs text-primary hover:underline mt-0.5 inline-flex items-center gap-1"
+              >
+                <UIcon name="i-lucide-video" class="size-3" />
+                Join link
+              </a>
             </td>
             <td class="px-4 py-3 text-muted">
               <p>Every {{ dayLabel(meeting.day_of_week) }}</p>
