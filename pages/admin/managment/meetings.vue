@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useScheduledMeetings, DAY_OPTIONS } from '~/composables/useScheduledMeetings'
 import { usePrograms } from '~/composables/usePrograms'
 import { useCohorts } from '~/composables/useCohorts'
@@ -16,9 +16,27 @@ const { programs, programOptions, fetchPrograms } = usePrograms()
 const { cohorts, fetchCohorts } = useCohorts()
 const { showSuccess, showError } = useNotifications()
 
-const cohortOptions = computed(() =>
-  cohorts.value.map((c: any) => ({ label: c.name, value: c.id }))
-)
+// /api/cohorts groups cohort rows by name (the same cohort name, e.g.
+// "Sep 2025", can exist as separate rows per program), so entries here
+// have no single top-level `id` -- only a `cohort_ids` array and a
+// `programs` array where each program carries its own real `cohort_id`.
+// Flatten that into individual, submittable options, disambiguating by
+// program name whenever a cohort name spans more than one program.
+const cohortOptions = computed(() => {
+  const opts: { label: string; value: string }[] = []
+  for (const c of cohorts.value as any[]) {
+    const progs = c.programs || []
+    if (progs.length === 0) continue
+    if (progs.length === 1) {
+      opts.push({ label: c.name, value: progs[0].cohort_id })
+    } else {
+      for (const p of progs) {
+        opts.push({ label: `${c.name} (${p.name})`, value: p.cohort_id })
+      }
+    }
+  }
+  return opts
+})
 
 const isModalOpen = ref(false)
 const editingMeeting = ref<any>(null)
