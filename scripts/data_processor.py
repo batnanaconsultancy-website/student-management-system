@@ -596,6 +596,13 @@ class StudentDataProcessor:
         # Get seasons grouped by program for proper filtering
         self.seasons_by_program = self._get_seasons_by_program()
 
+        # Same seasons, but as an ordered list per program (by order_in_program).
+        # Needed to correctly infer "current season": it has to consider every
+        # season in the student's program, including ones they haven't started
+        # yet (no scrape entry at all), not just the ones Qwasar happened to
+        # report data for.
+        self.ordered_seasons_by_program = self._get_ordered_seasons_by_program()
+
         # Denormalized student identity info, used to make
         # student_duplicate_project_report rows readable without joins
         self.student_details_map = self._get_student_details_map()
@@ -636,6 +643,26 @@ class StudentDataProcessor:
             print(f"Error fetching seasons by program: {e}")
             return {}
     
+    def _get_ordered_seasons_by_program(self):
+        """Get seasons grouped by program_id, sorted by order_in_program.
+        Used for current-season inference, which needs the student's full
+        program timeline -- including seasons they haven't started yet --
+        not just the subset Qwasar happened to report progress for."""
+        try:
+            response = self.supabase.from_('seasons').select(
+                'id, name, program_id, order_in_program'
+            ).order('order_in_program').execute()
+            ordered = {}
+            for row in response.data:
+                program_id = row['program_id']
+                ordered.setdefault(program_id, []).append(
+                    {'id': row['id'], 'name': row['name'], 'order': row['order_in_program']}
+                )
+            return ordered
+        except Exception as e:
+            print(f"Error fetching ordered seasons by program: {e}")
+            return {}
+
     def update_student_extra_data(self, scraped_data):
         """Update student extra information (last login, points, etc.)"""
         print_step("STUDENT EXTRA DATA", "Updating student details, points, and login info")
@@ -682,53 +709,62 @@ class StudentDataProcessor:
                     if not filtered_season_progress:
                         print(f"Warning: No program-relevant seasons found for {username} in season_progress: {season_progress}")
                     else:
-                        # Seasons are listed in chronological order in the dict
-                        # The LAST season (not 100% complete) is the current one
-                        # If all are 100%, use the last one anyway
-                        current_season_name = None
-                        last_season_name = None
-
-                        # Python 3.7+ maintains dict insertion order, so we can rely on it
-                        # Find the last season that's not 100% complete
-                        for season_name, progress_str in filtered_season_progress.items():
-                            last_season_name = season_name  # Always track the last season
-
+                        def parse_progress(progress_str):
                             try:
-                                # Parse percentage string like "3%" or "75%"
                                 if isinstance(progress_str, str):
                                     if progress_str == 'Unknown':
-                                        progress_value = 0
-                                    elif progress_str.endswith('%'):
-                                        progress_value = float(progress_str[:-1])
-                                    else:
-                                        progress_value = float(progress_str)
-                                else:
-                                    progress_value = float(progress_str)
-
-                                # Keep updating to the latest season that's not completed
-                                # (per university policy, "completed" means >= 75%, not 100%)
-                                if progress_value < SEASON_COMPLETION_THRESHOLD_PCT:
-                                    current_season_name = season_name
+                                        return 0.0
+                                    if progress_str.endswith('%'):
+                                        return float(progress_str[:-1])
+                                    return float(progress_str)
+                                return float(progress_str)
                             except (ValueError, TypeError):
-                                # If we can't parse, still consider it as potential current season
-                                current_season_name = season_name
-                                continue
+                                # Unparseable -- treat as not-yet-complete rather
+                                # than silently skipping the season.
+                                return 0.0
 
-                        # If no season < 100% was found, use the last season in the list
-                        if not current_season_name and last_season_name:
-                            current_season_name = last_season_name
+                        # Progress by DB season name, from whatever Qwasar
+                        # reported for this student.
+                        progress_by_season_name = {
+                            map_season_name_to_db(name): parse_progress(pct)
+                            for name, pct in filtered_season_progress.items()
+                        }
+
+                        ordered_seasons = self.ordered_seasons_by_program.get(student_program_id, [])
+
+                        current_season_name = None
+                        current_season_id = None
+
+                        # Current season = the EARLIEST season (in program
+                        # order) still below the completion threshold.
+                        # Seasons with no scrape entry at all (not started
+                        # yet) count as 0% -- so a student who finished
+                        # every season they've touched correctly advances to
+                        # the next untouched one, instead of the fallback
+                        # incorrectly landing back on the last *completed*
+                        # season they have data for.
+                        for season in ordered_seasons:
+                            progress_value = progress_by_season_name.get(season['name'], 0.0)
+                            if progress_value < SEASON_COMPLETION_THRESHOLD_PCT:
+                                current_season_name = season['name']
+                                current_season_id = season['id']
+                                break
+
+                        # Every season in the program (including ones never
+                        # started) is >= threshold -- they've finished the
+                        # whole program. Use the last season as current.
+                        if not current_season_id and ordered_seasons:
+                            last_season = ordered_seasons[-1]
+                            current_season_name = last_season['name']
+                            current_season_id = last_season['id']
                             print(f"All seasons >= {SEASON_COMPLETION_THRESHOLD_PCT}% complete for {username}, using last season: {current_season_name}")
 
-                        # Map and set current season
-                        if current_season_name:
-                            mapped_season = map_season_name_to_db(current_season_name)
-                            season_id = program_seasons.get(mapped_season)
-
-                            if season_id:
-                                update_record["current_season_id"] = season_id
-                                print(f"Set current season for {username}: {current_season_name} (progress: {filtered_season_progress.get(current_season_name)})")
-                            else:
-                                print(f"Warning: Season '{mapped_season}' not found in program {student_program_id} for student {username}")
+                        if current_season_id:
+                            update_record["current_season_id"] = current_season_id
+                            shown_progress = filtered_season_progress.get(current_season_name, '0%')
+                            print(f"Set current season for {username}: {current_season_name} (progress: {shown_progress})")
+                        elif not ordered_seasons:
+                            print(f"Warning: No ordered seasons found for program {student_program_id}, cannot determine current season for {username}")
             
             # Handle other fields
             if "img_url" in student_data:
@@ -828,7 +864,7 @@ class StudentDataProcessor:
                     "progress_percentage": completion_percentage,
                     "is_completed": completion_percentage >= SEASON_COMPLETION_THRESHOLD_PCT,
                     # "completion_date": datetime.now().date().isoformat() if completion_percentage >= SEASON_COMPLETION_THRESHOLD_PCT else None,
-                    "updated_at": datetime.now().isoformat() if completion_percentage >= SEASON_COMPLETION_THRESHOLD_PCT else None,
+                    "updated_at": datetime.now().isoformat(),
                 }
 
                 key = (student_id, season_id)
