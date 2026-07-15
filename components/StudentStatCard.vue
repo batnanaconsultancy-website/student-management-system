@@ -39,7 +39,7 @@ const props = defineProps({
   },
 });
 
-const isLoading = computed(() => props.count === null || props.count === undefined || props.count === 0);
+const isLoading = computed(() => props.count === null || props.count === undefined);
 
 const getBadgeColor = (change, invertColors) => {
   if (change === 0) return "neutral";

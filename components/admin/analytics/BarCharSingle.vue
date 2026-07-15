@@ -1,15 +1,11 @@
 <script lang="ts" setup>
 type MeetingDataItem = {
   meetingType: string
-  totalMeetings: number
   attendedMeetings: number
   attendancesPerStudent: number
 }
 
 const props = defineProps({
-  sumWorkshops: { type: Number, required: true },
-  sumStandups: { type: Number, required: true },
-  sumMentorings: { type: Number, required: true },
   sumWorkshopAttended: { type: Number, required: true },
   sumStandupAttended: { type: Number, required: true },
   sumMentoringAttended: { type: Number, required: true },
@@ -17,14 +13,13 @@ const props = defineProps({
 });
 
 const MeetingData: MeetingDataItem[] = [
-  { meetingType: 'Workshop', totalMeetings: props.sumWorkshops, attendedMeetings: props.sumWorkshopAttended, attendancesPerStudent: props.studentCount > 0 ? Math.round(props.sumWorkshopAttended / props.studentCount) : 0 },
-  { meetingType: 'Standup', totalMeetings: props.sumStandups, attendedMeetings: props.sumStandupAttended, attendancesPerStudent: props.studentCount > 0 ? Math.round(props.sumStandupAttended / props.studentCount) : 0 },
-  { meetingType: 'Mentoring', totalMeetings: props.sumMentorings, attendedMeetings: props.sumMentoringAttended, attendancesPerStudent: props.studentCount > 0 ? Math.round(props.sumMentoringAttended / props.studentCount) : 0 },
+  { meetingType: 'Workshop', attendedMeetings: props.sumWorkshopAttended, attendancesPerStudent: props.studentCount > 0 ? Math.round(props.sumWorkshopAttended / props.studentCount) : 0 },
+  { meetingType: 'Standup', attendedMeetings: props.sumStandupAttended, attendancesPerStudent: props.studentCount > 0 ? Math.round(props.sumStandupAttended / props.studentCount) : 0 },
+  { meetingType: 'Mentoring', attendedMeetings: props.sumMentoringAttended, attendancesPerStudent: props.studentCount > 0 ? Math.round(props.sumMentoringAttended / props.studentCount) : 0 },
 ]
 
 const MeetingCategories = {
-  totalMeetings: { name: 'Total Meetings', color: '#ebebf7' },
-  attendedMeetings: { name: 'Attended Meetings', color: '#706fe5' },
+  attendedMeetings: { name: 'Total Attended', color: '#706fe5' },
   attendancesPerStudent: { name: 'Average Attendances per Student', color: '#ffc400' },
 }
 
@@ -38,7 +33,7 @@ const yFormatter = (tick: number) => tick.toString()
     :data="MeetingData"
     :height="400"
     :categories="MeetingCategories"
-    :y-axis="['totalMeetings', 'attendedMeetings', 'attendancesPerStudent']"
+    :y-axis="['attendedMeetings', 'attendancesPerStudent']"
     :group-padding="0"
     :bar-padding="0.1"
     :x-num-ticks="1"

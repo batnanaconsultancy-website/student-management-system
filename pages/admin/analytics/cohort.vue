@@ -16,8 +16,8 @@ const selectedSortOption = ref('name');
 const sortOptions = [
   { label: 'Cohort Name', value: 'name' },
   { label: 'Student Count', value: 'students' },
-  { label: 'Overall Attendance', value: 'overall' },
-  { label: 'Workshop Attendance', value: 'workshop' },
+  { label: 'Overall Avg / Student', value: 'overall' },
+  { label: 'Workshop Avg / Student', value: 'workshop' },
 ];
 
 onMounted(async () => {

@@ -9,23 +9,21 @@ const props = defineProps({
 const stats = computed(() => [
   {
     label: 'Workshop',
-    value: props.cohort.averages?.workshop,
+    value: props.cohort.attended?.workshop,
+    avg: props.cohort.averages?.workshop,
     icon: 'i-lucide-presentation',
   },
   {
     label: 'Standup',
-    value: props.cohort.averages?.standup,
+    value: props.cohort.attended?.standup,
+    avg: props.cohort.averages?.standup,
     icon: 'i-lucide-users',
   },
   {
     label: 'Mentoring',
-    value: props.cohort.averages?.mentoring,
+    value: props.cohort.attended?.mentoring,
+    avg: props.cohort.averages?.mentoring,
     icon: 'i-lucide-message-circle',
-  },
-  {
-    label: 'Recording',
-    value: props.cohort.averages?.recording,
-    icon: 'i-lucide-video',
   },
 ]);
 </script>
@@ -52,31 +50,23 @@ const stats = computed(() => [
             </span>
           </div>
         </div>
-        <UBadge
-          v-if="cohort.averages?.overall != null"
-          :color="cohort.averages.overall >= 75 ? 'success' : cohort.averages.overall >= 50 ? 'warning' : 'error'"
-          variant="subtle"
-          size="sm"
-        >
-          {{ cohort.averages.overall >= 75 ? 'Good' : cohort.averages.overall >= 50 ? 'Average' : 'Low' }}
-        </UBadge>
       </div>
     </template>
 
-    <!-- Main content with progress circle and stats -->
+    <!-- Overall average + per-type stats -->
     <div class="flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6">
-      <!-- Progress Circle -->
-      <div class="flex-shrink-0">
-        <ProgressCircleGradient
-          :percentage="cohort.averages?.overall"
-          :size="110"
-          :stroke-width="10"
-          label="Overall"
-        />
+      <!-- Overall: total attended sessions this cohort has logged, and the
+           average per student -- real numbers, not a percentage of an
+           "expected" total that has no real data source. -->
+      <div class="flex-shrink-0 text-center">
+        <p class="text-3xl font-semibold text-highlighted">
+          {{ cohort.averages?.overall ?? 'N/A' }}
+        </p>
+        <p class="text-xs text-muted mt-1">Avg attended / student</p>
       </div>
 
       <!-- Stats Grid -->
-      <div class="grid grid-cols-2 gap-1 w-full sm:w-auto">
+      <div class="grid grid-cols-3 gap-1 w-full sm:w-auto">
         <div
           v-for="stat in stats"
           :key="stat.label"
@@ -87,7 +77,10 @@ const stats = computed(() => [
             <span class="text-xs text-muted truncate">{{ stat.label }}</span>
           </div>
           <p class="text-base sm:text-lg font-semibold">
-            {{ stat.value != null ? `${Math.round(stat.value)}%` : 'N/A' }}
+            {{ stat.value ?? 0 }}
+          </p>
+          <p class="text-xs text-muted">
+            {{ stat.avg ?? 0 }} avg/student
           </p>
         </div>
       </div>
