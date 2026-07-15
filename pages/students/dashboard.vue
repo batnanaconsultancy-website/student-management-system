@@ -163,7 +163,7 @@
 
           <div class="flex gap-8 translate-y-4 xl:translate-y-6">
                  <StudentDashboardStatCard
-                  :value="studentData.points ?? 0"
+                  :value="studentData.points_assigned ?? 0"
                   label="Earned Points"
                   icon="i-lucide:star"
                 />
