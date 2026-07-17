@@ -158,22 +158,25 @@ const value = ref('Active')
 watch(
   () => props.data,
   (newData) => {
-    const cohorts = [...new Set(newData.map(item => item.cohort))];
+    const cohorts = [...new Set(newData.map(item => item.cohort))].filter(Boolean);
 
-    // Sort cohorts by date (e.g., "Sep 22", "Mar 25")
+    // Sort cohorts by date (e.g., "Sep 22", "Mar 25") -- guard against
+    // unparseable values (e.g. a missing cohort relation) so one bad
+    // entry can't throw the comparator off for everything else.
     const sortedCohorts = cohorts.sort((a, b) => {
       const monthMap = {
         'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
         'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
       };
 
-      const [monthA, yearA] = a.split(' ');
-      const [monthB, yearB] = b.split(' ');
+      const [monthA, yearA] = (a || '').split(' ');
+      const [monthB, yearB] = (b || '').split(' ');
 
-      const dateA = new Date(2000 + parseInt(yearA), monthMap[monthA]);
-      const dateB = new Date(2000 + parseInt(yearB), monthMap[monthB]);
+      const dateA = new Date(2000 + (parseInt(yearA) || 0), monthMap[monthA] ?? 0);
+      const dateB = new Date(2000 + (parseInt(yearB) || 0), monthMap[monthB] ?? 0);
 
-      return dateA - dateB;
+      const diff = dateA - dateB;
+      return Number.isNaN(diff) ? String(a).localeCompare(String(b)) : diff;
     });
 
     cohortItems.value = sortedCohorts.map(cohort => ({
@@ -188,19 +191,17 @@ watch(
 watch(
   () => cohortFilter.value,
   (newVal) => {
-    if (!table?.value?.tableApi) return;
-    if (newVal === 'all') {
-      table.value.tableApi.getColumn('cohort')?.setFilterValue(undefined)
-      return
-    }
-
-    const cohortColumn = table.value.tableApi.getColumn("cohort");
-    if (!cohortColumn) return;
-
-    if (newVal === "all") {
-      cohortColumn.setFilterValue(undefined);
+    // Drive columnFilters directly (the actual v-model source of truth
+    // for the table) rather than going through tableApi.getColumn(),
+    // which depends on the template ref being ready at the moment this
+    // watcher fires.
+    const idx = columnFilters.value.findIndex((f) => f.id === 'cohort');
+    if (!newVal || newVal === 'all') {
+      if (idx !== -1) columnFilters.value.splice(idx, 1);
+    } else if (idx !== -1) {
+      columnFilters.value[idx] = { id: 'cohort', value: newVal };
     } else {
-      cohortColumn.setFilterValue(newVal);
+      columnFilters.value.push({ id: 'cohort', value: newVal });
     }
   }
 );
