@@ -271,18 +271,24 @@
       allowedStartDate.value = startDate;
       allowedEndDate.value = endDate;
 
-      currentDate.value = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      // If today falls within this season, jump to today's month so the
+      // student immediately sees where they are -- not always the
+      // season's start month, which could be many months in the past.
+      const now = new Date();
+      const todayInSeason = now >= startDate && now <= endDate;
+      const targetDate = todayInSeason ? now : startDate;
+      currentDate.value = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
 
       console.log("🔍 Season selected:", selectedSeason);
       // Load projects for this season
       await loadProjectsForSeason(selectedSeason.id);
 
-      // Scroll to the start day of the season in the current month
+      // Scroll to today (if visible) or the season's start day otherwise
       if (
-        currentDate.value.getFullYear() === startDate.getFullYear() &&
-        currentDate.value.getMonth() === startDate.getMonth()
+        currentDate.value.getFullYear() === targetDate.getFullYear() &&
+        currentDate.value.getMonth() === targetDate.getMonth()
       ) {
-        scrollToDay(startDate.getDate());
+        scrollToDay(targetDate.getDate());
       }
     }
   );
@@ -349,36 +355,38 @@
     const seasonEndDate = new Date(pcsData.end_date);
     console.log("✅ Found program_cohort_season_id:", programCohortSeasonId);
 
-    // If this is a Final Project season, create a single item spanning the entire season
+    // Always add a season-boundary marker spanning the season's actual
+    // start_date -> end_date, regardless of how long the season runs
+    // (some seasons are a few weeks, others span several months) and
+    // regardless of whether any individual projects have been scheduled
+    // inside it yet. Without this, a season with no projects scheduled
+    // showed a completely blank timeline -- no start/end pins at all.
+    let seasonMarkerItems: any[] = [];
+    if (!(seasonEndDate < monthStart || seasonStartDate > monthEnd)) {
+      const startDay = Math.max(1, seasonStartDate > monthStart ? seasonStartDate.getDate() : 1);
+      const endDay = Math.min(
+        monthEnd.getDate(),
+        seasonEndDate < monthEnd ? seasonEndDate.getDate() : monthEnd.getDate()
+      );
+
+      seasonMarkerItems = [{
+        title: seasonName,
+        type: 4,
+        startDate: startDay,
+        endDate: endDay,
+        season: seasonName,
+        seasonColor: "var(--color-primary-500)",
+        id: `season-marker-${programCohortSeasonId}`,
+        crossMonth: seasonEndDate > monthEnd,
+      }];
+    }
+
+    // If this is a Final Project season, that marker IS the whole
+    // timeline for it -- there's nothing else to schedule underneath.
     if (isFinalProjectSeason) {
-      console.log("🎓 Creating Final Project item spanning entire season");
-
-      // Only show if the season overlaps with current month
-      if (!(seasonEndDate < monthStart || seasonStartDate > monthEnd)) {
-        const startDay = Math.max(1, seasonStartDate > monthStart ? seasonStartDate.getDate() : 1);
-        const endDay = Math.min(
-          monthEnd.getDate(),
-          seasonEndDate < monthEnd ? seasonEndDate.getDate() : monthEnd.getDate()
-        );
-
-        const timelineProjects = [{
-          title: seasonName,
-          type: 4,
-          startDate: startDay,
-          endDate: endDay,
-          season: seasonName,
-          seasonColor: "var(--color-primary-500)",
-          id: `final-project-${programCohortSeasonId}`,
-          crossMonth: seasonEndDate > monthEnd,
-          avatars: [],
-        }];
-
-        projectItems.value = calculateNonOverlappingPositions(timelineProjects);
-        console.log("✨ Final Project item created:", projectItems.value);
-      } else {
-        projectItems.value = [];
-        console.log("⏭️ Final Project season doesn't overlap with current month");
-      }
+      console.log("🎓 Final Project season -- using the season marker as the only item");
+      projectItems.value = calculateNonOverlappingPositions(seasonMarkerItems);
+      console.log("✨ Final Project item created:", projectItems.value);
       return;
     }
 
@@ -409,12 +417,12 @@
     console.log(`📊 Found ${schedules.length} project schedules`);
 
     if (schedules.length === 0) {
-      console.warn("⚠️ No projects found for this season");
-      projectItems.value = [];
+      console.warn("⚠️ No projects found for this season -- showing season marker only");
+      projectItems.value = calculateNonOverlappingPositions(seasonMarkerItems);
       return;
     }
 
-    let timelineProjects: any[] = [];
+    let timelineProjects: any[] = [...seasonMarkerItems];
 
     // Handle all projects individually with their actual dates
     schedules.forEach((schedule: any) => {
@@ -514,6 +522,52 @@
     ],
   };
 
+  // Adds a single season-boundary marker (Start/End pins) into the given
+  // month-keyed timelineProjects map, splitting it across however many
+  // months the season actually spans -- correctly handles both short
+  // (a few weeks, fits in one month) and long (several months) seasons.
+  const addSeasonMarkerAcrossMonths = (
+    timelineProjects: Record<string, any[]>,
+    seasonName: string,
+    startDate: Date,
+    endDate: Date,
+    idPrefix: string
+  ) => {
+    let currentMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+    const lastMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+
+    while (currentMonth <= lastMonth) {
+      const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, "0")}`;
+
+      if (!timelineProjects[monthKey]) {
+        timelineProjects[monthKey] = [];
+      }
+
+      const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+      const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+
+      const itemStartInMonth = Math.max(startDate.getTime(), monthStart.getTime());
+      const itemEndInMonth = Math.min(endDate.getTime(), monthEnd.getTime());
+
+      const startDay = new Date(itemStartInMonth).getDate();
+      const endDay = new Date(itemEndInMonth).getDate();
+      const crossMonth = endDate > monthEnd;
+
+      timelineProjects[monthKey].push({
+        title: seasonName,
+        type: 4,
+        startDate: startDay,
+        endDate: endDay,
+        crossMonth: crossMonth,
+        season: seasonName,
+        seasonColor: "var(--color-primary-500)",
+        id: `${idPrefix}-${monthKey}`,
+      });
+
+      currentMonth.setMonth(currentMonth.getMonth() + 1);
+    }
+  };
+
   // Function to add seasons array to timeline (for overview mode without season filter)
   const addSeasonsToTimeline = async (
     seasons: Array<{ id: any; name: string; start_date: string; end_date: string }>
@@ -538,49 +592,22 @@
         isFinalProjectSeason,
       });
 
-      // If this is a Final Project season, create a single item spanning the entire season
+      // Always add a season-boundary marker spanning the season's actual
+      // start_date -> end_date (across however many months it takes --
+      // some seasons run a few weeks, others several months), regardless
+      // of whether it has any individual projects scheduled inside it.
+      addSeasonMarkerAcrossMonths(
+        timelineProjects,
+        seasonGroup.baseName,
+        startDate,
+        endDate,
+        `season-${seasonGroup.ids.join("-")}`
+      );
+
+      // A Final Project season's marker IS its whole timeline -- there's
+      // nothing else to schedule underneath it.
       if (isFinalProjectSeason) {
-        console.log(`🎓 Creating Final Project item for entire season duration`);
-
-        // Create entries for each month this season spans
-        let currentMonth = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
-        const lastMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-
-        while (currentMonth <= lastMonth) {
-          const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, "0")}`;
-
-          if (!timelineProjects[monthKey]) {
-            timelineProjects[monthKey] = [];
-          }
-
-          const monthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
-          const monthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
-
-          const itemStartInMonth = Math.max(startDate.getTime(), monthStart.getTime());
-          const itemEndInMonth = Math.min(endDate.getTime(), monthEnd.getTime());
-
-          const startDay = new Date(itemStartInMonth).getDate();
-          const endDay = new Date(itemEndInMonth).getDate();
-          const crossMonth = endDate > monthEnd;
-
-          console.log(`  ➕ Adding Final Project to month ${monthKey}: days ${startDay}-${endDay}`);
-
-          timelineProjects[monthKey].push({
-            title: seasonGroup.baseName,
-            type: 4,
-            startDate: startDay,
-            endDate: endDay,
-            crossMonth: crossMonth,
-            season: seasonGroup.baseName,
-            seasonColor: "var(--color-primary-500)",
-            id: `final-project-${seasonGroup.ids.join("-")}-${monthKey}`,
-          });
-
-          // Move to next month
-          currentMonth.setMonth(currentMonth.getMonth() + 1);
-        }
-
-        // Skip fetching individual projects for Final Project seasons
+        console.log(`🎓 Final Project season -- marker only, no individual projects to fetch`);
         continue;
       }
 
@@ -1104,9 +1131,9 @@
     // First, get the student's cohort ID
     const { data: student, error: studentError } = await supabase
       .from("students")
-      .select("cohort_id, program_id")
+      .select("cohort_id, program_id, current_season_id")
       .eq("email", session?.user?.email ?? "")
-      .single<{ cohort_id: string; program_id: string }>();
+      .single<{ cohort_id: string; program_id: string; current_season_id: string | null }>();
 
     if (student) {
       studentProgramId.value = student.program_id;
@@ -1154,6 +1181,18 @@
     // Process seasons and add to timeline using actual project dates
     if (seasons) {
       await addSeasonsToTimeline(seasons);
+    }
+
+    // Default to the student's current season, so clicking into Timeline
+    // immediately shows "where am I relative to this season" instead of
+    // an unfiltered overview the student has to manually narrow down.
+    if (student?.current_season_id && !selectedSeasonId.value) {
+      const currentSeasonMatch = cohortSeasonsDeadlines.value.find(
+        (s) => String(s.id) === String(student.current_season_id)
+      );
+      if (currentSeasonMatch) {
+        selectedSeasonId.value = String(student.current_season_id);
+      }
     }
   };
 
