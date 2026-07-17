@@ -1,5 +1,5 @@
 <script setup>
-  import { computed } from "vue";
+  import { computed, ref } from "vue";
   import { CACHE_KEYS } from '~/composables/useCacheInvalidation';
 
   // Page that cannot be accessed without authentication and has logic to log-out a user.
@@ -9,6 +9,7 @@
   });
 
   const nuxtApp = useNuxtApp();
+  const bulkStatusModalOpen = ref(false);
 
   // Use cached fetch for snapshot data
   const { data: snapshotData, status: snapshotStatus } = useFetch('/api/snapshot', {
@@ -155,11 +156,27 @@
               />
             </UPageGrid>
        
+            <div class="flex justify-end mb-2">
+              <UButton
+                icon="i-lucide-users-round"
+                color="neutral"
+                variant="outline"
+                @click="bulkStatusModalOpen = true"
+              >
+                Bulk Change Status
+              </UButton>
+            </div>
 
             <StudentsTable
               :data="data"
               :loading="loading"
               @refresh-data="fetchStudents"
+            />
+
+            <AdminBulkStatusChangeModal
+              v-model:open="bulkStatusModalOpen"
+              :students="data"
+              @updated="fetchStudents"
             />
         </template>
     </UDashboardPanel>
