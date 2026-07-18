@@ -117,7 +117,7 @@ async function confirmImport() {
       </div>
       <UTooltip
         arrow
-        text="CSV columns (in order): Full Name, Qwasar ID, Email, Programme, Cohort. Header row is ignored."
+        text="CSV columns (in order): Full Name, Qwasar ID, Email, Programme, Cohort, Class (optional -- 'Regular' or 'Code Academy', defaults to Regular if omitted). Header row is ignored."
         :delay-duration="0"
       >
         <UIcon name="i-lucide-info" class="text-muted size-4 cursor-pointer mt-1 mr-2" />
@@ -218,7 +218,7 @@ async function confirmImport() {
             class="text-xs text-muted flex justify-between"
           >
             <span>{{ s.name }}</span>
-            <span class="text-muted/60">{{ s.programme }} · {{ s.cohort }}</span>
+            <span class="text-muted/60">{{ s.programme }} · {{ s.cohort }} · {{ s.studentClass }}</span>
           </li>
         </ul>
       </UCard>

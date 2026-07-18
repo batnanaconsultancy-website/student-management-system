@@ -50,6 +50,7 @@
       username: s.username || "",
       cohort: s.cohorts?.name || "",
       accountStatus: s.account_status || 'Active',
+      studentClass: s.student_class || 'Regular',
       points_assigned: s.points_assigned || 0,
       profileImgUrl: s.profile_image_url || "",
     }));

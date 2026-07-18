@@ -11,6 +11,7 @@ export default defineEventHandler(async (event) => {
       email,
       status,
       account_status,
+      student_class,
       username,
       cohorts(name),
       programs(name),

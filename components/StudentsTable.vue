@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { getPaginationRowModel } from "@tanstack/vue-table";
 import { resolveComponent, ref, watch } from "vue";
-import { STATUS_OPTIONS, PROGRAM_OPTIONS } from '~/constants/options'
+import { STATUS_OPTIONS, PROGRAM_OPTIONS, STUDENT_CLASS_OPTIONS } from '~/constants/options'
 
 import * as z from 'zod'
 import type { FormSubmitEvent } from '@nuxt/ui'
@@ -140,6 +140,7 @@ const sorting = ref([
 const statusFilter = ref("all");
 const programFilter = ref("all");
 const cohortFilter = ref("all");
+const classFilter = ref("all");
 const cohortItems = ref([]);
 const open = ref(false)
 const openModal = ref(false)
@@ -228,6 +229,22 @@ watch(
 );
 
 watch(
+  () => classFilter.value,
+  (newVal) => {
+    // Driven directly through columnFilters (the table's v-model source
+    // of truth), same robust approach used for the cohort filter.
+    const idx = columnFilters.value.findIndex((f) => f.id === 'studentClass');
+    if (!newVal || newVal === 'all') {
+      if (idx !== -1) columnFilters.value.splice(idx, 1);
+    } else if (idx !== -1) {
+      columnFilters.value[idx] = { id: 'studentClass', value: newVal };
+    } else {
+      columnFilters.value.push({ id: 'studentClass', value: newVal });
+    }
+  }
+);
+
+watch(
   () => statusFilter.value,
   (newVal) => {
     if (!table?.value?.tableApi) return;
@@ -284,6 +301,15 @@ const columns = [
   { accessorKey: "email", header: "Email" },
   { accessorKey: "program", header: "Program" },
   { accessorKey: "cohort", header: "Cohort" },
+  {
+    accessorKey: "studentClass",
+    header: "Class",
+    cell: ({ row }) => {
+      const studentClass = row.getValue("studentClass");
+      const color = studentClass === "Code Academy" ? "info" : "neutral";
+      return h(UBadge, { variant: "subtle", color }, () => studentClass);
+    },
+  },
   { accessorKey: "points_assigned", header: "Points",  },
   {
     accessorKey: "status",
@@ -457,6 +483,17 @@ const onSelect = async (selectedRows: any[]) => {
             trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
           }"
           placeholder="Filter program"
+          class="min-w-52"
+        />
+
+        <USelect
+          size="md"
+          v-model="classFilter"
+          :items="[{ label: 'All', value: 'all' }, ...STUDENT_CLASS_OPTIONS]"
+          :ui="{
+            trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
+          }"
+          placeholder="Filter class"
           class="min-w-52"
         />
 
