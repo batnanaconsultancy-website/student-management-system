@@ -19,6 +19,15 @@ const mainLinks: NavigationMenuItem[] = [
     },
   },
   {
+    label: "Guidance Inbox",
+    to: "/admin/guidance-inbox",
+    ariaLabel: "Guidance Inbox",
+    icon: "i-lucide-life-buoy",
+    tooltip: {
+      text: "Guidance Inbox",
+    },
+  },
+  {
     label: "Analytics",
     icon: "i-pajamas:chart",
     ariaLabel: "Analytics",

@@ -70,6 +70,15 @@
         text: "Extra Tracks",
       },
     },
+    {
+      label: "Guidance & Request",
+      to: "/students/guidance",
+      ariaLabel: "Guidance & Request",
+      icon: "i-lucide-life-buoy",
+      tooltip: {
+        text: "Guidance & Request",
+      },
+    },
   ];
 
   const secondaryLinks: NavigationMenuItem[] = [
