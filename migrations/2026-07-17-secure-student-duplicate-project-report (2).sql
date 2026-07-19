@@ -51,3 +51,10 @@ CREATE POLICY "student_duplicate_project_report: admin full access"
 CREATE POLICY "student_duplicate_project_report: student reads own"
     ON student_duplicate_project_report FOR SELECT
     USING (student_id = my_student_id());
+
+-- RLS policies alone aren't enough -- Postgres also requires the base
+-- table-level GRANT before a role can attempt an operation at all. This
+-- table was created via raw SQL (not Supabase's Table Editor UI, which
+-- auto-grants), so it needs this explicitly.
+GRANT SELECT ON student_duplicate_project_report TO authenticated;
+GRANT ALL ON student_duplicate_project_report TO service_role;

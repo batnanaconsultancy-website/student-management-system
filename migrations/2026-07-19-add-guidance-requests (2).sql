@@ -43,3 +43,11 @@ CREATE POLICY "guidance_requests: student reads own"
 CREATE POLICY "guidance_requests: student inserts own"
     ON guidance_requests FOR INSERT
     WITH CHECK (student_id = my_student_id());
+
+-- RLS policies alone aren't enough -- Postgres also requires the base
+-- table-level GRANT before a role can attempt an operation at all.
+-- Pre-existing tables in this schema got this automatically from being
+-- created via Supabase's Table Editor UI; a raw CREATE TABLE like this
+-- one does not, so it must be granted explicitly.
+GRANT SELECT, INSERT, UPDATE ON guidance_requests TO authenticated;
+GRANT ALL ON guidance_requests TO service_role;

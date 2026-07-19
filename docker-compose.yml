@@ -1,0 +1,16 @@
+# Runs the Nuxt app on the VPS. Point Caddy/Nginx at localhost:3000.
+# Supabase itself runs separately -- deploy it via Hostinger's one-click
+# Supabase application, or the official supabase/docker repo, in its own
+# directory. This compose file is just for the app.
+#
+# All the same env vars from your current .env / Vercel project settings
+# go here -- copy them into a real .env file next to this compose file
+# (do not commit that .env file).
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env

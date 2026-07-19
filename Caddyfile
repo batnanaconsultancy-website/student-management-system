@@ -1,0 +1,15 @@
+# Reverse proxy with automatic HTTPS (Let's Encrypt). Replace the domain
+# below with your real one, then run: caddy run --config Caddyfile
+#
+# If you're also self-hosting Supabase on this same VPS, give it its own
+# subdomain (e.g. supabase.yourdomain.com) pointed at whatever port the
+# Supabase Kong gateway listens on (8000 by default), so the app and
+# Supabase don't collide on the same host/port.
+
+yourdomain.com {
+    reverse_proxy localhost:3000
+}
+
+supabase.yourdomain.com {
+    reverse_proxy localhost:8000
+}

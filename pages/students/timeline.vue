@@ -9,6 +9,10 @@
       </template>
 
       <template #body>
+        <div v-if="timelineError" class="mx-6 mt-4 rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
+          {{ timelineError }}
+        </div>
+
         <!-- Header with month/year and navigation -->
         <div class="flex items-center justify-center relative">
             <UFieldGroup size="xl" class="absolute left-0">
@@ -235,6 +239,7 @@
 
   // Dynamic project items based on month/year
   const projectItems = ref<ProjectItem[]>([]);
+  const timelineError = ref<string | null>(null);
 
   // For season dropdown
   const studentSeasons = ref<Array<{ label: string; value: string }>>([]);
@@ -346,10 +351,21 @@
     console.log("🔗 program_cohort_seasons query result:", { pcsData, pcsError });
 
     if (pcsError || !pcsData) {
+      // Don't fail silently into a blank timeline -- this happens when
+      // program_cohort_seasons has no row for this exact
+      // season/cohort/program combination (a scheduling data gap, not
+      // necessarily a code bug), and silently showing nothing made it
+      // impossible to tell the difference between "no projects" and
+      // "this program's schedule was never configured for this season."
       console.error("❌ Error fetching program_cohort_season:", pcsError);
+      timelineError.value =
+        `No schedule is configured for "${seasonName}" for your program/cohort yet. ` +
+        `An admin needs to set start/end dates for this season under your program in Seasons management.`;
+      projectItems.value = [];
       return;
     }
 
+    timelineError.value = null;
     const programCohortSeasonId = pcsData.id;
     const seasonStartDate = new Date(pcsData.start_date);
     const seasonEndDate = new Date(pcsData.end_date);
@@ -792,21 +808,26 @@
 
   // Helper function to extract season base name and specialization
   const extractSeasonInfo = (seasonName: string) => {
-    // Pattern matching for different season formats
+    // Pattern matching for different season formats. These must match
+    // the actual specialization suffixes used in your season names
+    // (confirmed against real data, not guessed) -- e.g. the scraper
+    // logs show "Season 03 Software Engineer Cpp" AND
+    // "Season 03 Software Engineer Golang" as two distinct real season
+    // rows within the same program.
     const patterns = [
-      // "Season 03 Software Engineer Cpp" -> base: "Season 03 Software Engineer", specialization: "Cpp"
+      // "Season 03 Software Engineer Cpp/Golang/Rust" -> base: "Season 03 Software Engineer"
       {
-        regex: /^(Season \d+ Software Engineer)\s+(Cpp|Go|Rust)$/i,
+        regex: /^(Season \d+ Software Engineer)\s+(Cpp|Golang|Go|Rust)$/i,
         baseGroup: 1,
         specializationGroup: 2,
       },
-      // "Season 03 Machine Learning Python" -> base: "Season 03 Machine Learning", specialization: "Python"
+      // "Season 03 Machine Learning Python/R/TensorFlow" -> base: "Season 03 Machine Learning"
       {
         regex: /^(Season \d+ Machine Learning)\s+(Python|R|TensorFlow)$/i,
         baseGroup: 1,
         specializationGroup: 2,
       },
-      // "Season 02 Data Science Advanced" -> base: "Season 02 Data Science", specialization: "Advanced"
+      // "Season 02 Data Science Advanced/Basic/Intermediate" -> base: "Season 02 Data Science"
       {
         regex: /^(Season \d+ Data Science)\s+(Advanced|Basic|Intermediate)$/i,
         baseGroup: 1,

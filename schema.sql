@@ -196,6 +196,10 @@ CREATE TABLE IF NOT EXISTS students (
     account_status       TEXT NOT NULL DEFAULT 'Active',
     is_active            BOOLEAN NOT NULL DEFAULT TRUE,
 
+    -- Enrolment track: 'Regular' | 'Code Academy'
+    student_class         TEXT NOT NULL DEFAULT 'Regular'
+                          CHECK (student_class IN ('Regular', 'Code Academy')),
+
     -- Progress status (set by RPC function)
     --   status: 'On Track' | 'At Risk' | 'Monitor' | 'Ahead' | 'Unknown'
     status               TEXT,
@@ -281,6 +285,46 @@ CREATE TABLE IF NOT EXISTS progress_snapshots (
 );
 
 
+-- ── student_duplicate_project_report ────────────────────────────
+-- Written by scripts/data_processor.py when it has to pick between
+-- two conflicting season-progress entries for the same student
+-- (duplicate/extra-track resolution) -- kept as an audit record of
+-- which one was discarded and why.
+CREATE TABLE IF NOT EXISTS student_duplicate_project_report (
+    id                            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id                    UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    student_username              TEXT,
+    student_email                 TEXT,
+    student_first_name            TEXT,
+    student_last_name             TEXT,
+    season_id                     UUID REFERENCES seasons(id) ON DELETE CASCADE,
+    season_name                   TEXT,
+    kept_raw_label                TEXT,
+    kept_progress_percentage      NUMERIC,
+    discarded_raw_label           TEXT,
+    discarded_progress_percentage NUMERIC,
+    scraped_at                    TIMESTAMPTZ,
+    created_at                    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (student_id, season_id, discarded_raw_label)
+);
+
+-- ── guidance_requests ────────────────────────────────────────
+-- Student "Guidance & Request" submissions: one or more issue
+-- categories plus an optional short message. Every admin can see
+-- every submission (the admin inbox); a Slack + email notification
+-- fires server-side on submission.
+CREATE TABLE IF NOT EXISTS guidance_requests (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id   UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    categories   TEXT[] NOT NULL,
+    message      TEXT,
+    status       TEXT NOT NULL DEFAULT 'New'
+                 CHECK (status IN ('New', 'In Progress', 'Resolved')),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
 -- ============================================================
 -- 5. SETTINGS TABLE
 -- ============================================================
@@ -353,6 +397,14 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_date            ON progress_snapshots(s
 -- admin
 CREATE INDEX IF NOT EXISTS idx_admin_email               ON admin(email);
 
+-- student_duplicate_project_report
+CREATE INDEX IF NOT EXISTS idx_sdpr_student_id           ON student_duplicate_project_report(student_id);
+
+-- guidance_requests
+CREATE INDEX IF NOT EXISTS idx_guidance_requests_student_id  ON guidance_requests(student_id);
+CREATE INDEX IF NOT EXISTS idx_guidance_requests_status      ON guidance_requests(status);
+CREATE INDEX IF NOT EXISTS idx_guidance_requests_created_at  ON guidance_requests(created_at);
+
 
 -- ============================================================
 -- 7. UPDATED-AT TRIGGERS
@@ -365,7 +417,8 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql
+SET search_path = public, pg_temp;
 
 -- Apply to every table that has an updated_at column.
 CREATE TRIGGER set_updated_at_students
@@ -386,6 +439,10 @@ CREATE TRIGGER set_updated_at_cohort_meeting_stats
 
 CREATE TRIGGER set_updated_at_notification_settings
     BEFORE UPDATE ON notification_settings
+    FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+CREATE TRIGGER set_updated_at_guidance_requests
+    BEFORE UPDATE ON guidance_requests
     FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
 
@@ -415,6 +472,7 @@ CREATE OR REPLACE FUNCTION update_student_status_based_on_season_progress()
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER   -- runs with the privileges of the function owner (service role)
+SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_student           RECORD;
@@ -516,6 +574,13 @@ BEGIN
 END;
 $$;
 
+-- Only the scraper (scripts/student_management.py, service-role key)
+-- ever calls this -- no RLS policy references it and no app code calls
+-- it as an authenticated/anon user, so it doesn't need PUBLIC's default
+-- execute grant.
+REVOKE EXECUTE ON FUNCTION update_student_status_based_on_season_progress() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION update_student_status_based_on_season_progress() TO service_role;
+
 
 -- ============================================================
 -- 9. ROW-LEVEL SECURITY
@@ -537,6 +602,8 @@ ALTER TABLE student_season_progress       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE student_project_completion    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE progress_snapshots            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notification_settings         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE student_duplicate_project_report ENABLE ROW LEVEL SECURITY;
+ALTER TABLE guidance_requests             ENABLE ROW LEVEL SECURITY;
 
 -- ── Helper: is the caller an admin? ───────────────────────────
 -- Checks if the authenticated user's email appears in the admin
@@ -546,6 +613,7 @@ RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
     SELECT EXISTS (
         SELECT 1
@@ -560,12 +628,27 @@ RETURNS UUID
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
     SELECT id
     FROM   students
     WHERE  email = auth.email()
     LIMIT  1;
 $$;
+
+-- Both are used INSIDE RLS policies across nearly every table (e.g.
+-- "students: admin full access" calls is_admin(); "ssp: student reads
+-- own progress" calls my_student_id()). Admins and students both
+-- connect as the Postgres role `authenticated` (Supabase has no
+-- separate per-app-role DB role), so `authenticated` must keep EXECUTE
+-- on both or every one of those policies breaks for every logged-in
+-- user. Only `anon` (fully unauthenticated) is safe to lock out --
+-- no policy in this schema grants anon access to anything regardless,
+-- so this only tightens an already-inaccessible path.
+REVOKE EXECUTE ON FUNCTION is_admin() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION my_student_id() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION is_admin() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION my_student_id() TO authenticated, service_role;
 
 
 -- ── programs ─────────────────────────────────────────────────
@@ -732,6 +815,45 @@ CREATE POLICY "notifications: admin only"
     ON notification_settings FOR ALL
     USING (is_admin())
     WITH CHECK (is_admin());
+
+-- ── student_duplicate_project_report ────────────────────────────
+CREATE POLICY "student_duplicate_project_report: admin full access"
+    ON student_duplicate_project_report FOR ALL
+    USING (is_admin())
+    WITH CHECK (is_admin());
+
+CREATE POLICY "student_duplicate_project_report: student reads own"
+    ON student_duplicate_project_report FOR SELECT
+    USING (student_id = my_student_id());
+
+-- ── guidance_requests ────────────────────────────────────────
+-- All admins can see and manage every request (the inbox).
+CREATE POLICY "guidance_requests: admin full access"
+    ON guidance_requests FOR ALL
+    USING (is_admin())
+    WITH CHECK (is_admin());
+
+-- A student can see their own past requests...
+CREATE POLICY "guidance_requests: student reads own"
+    ON guidance_requests FOR SELECT
+    USING (student_id = my_student_id());
+
+-- ...and submit new ones, only under their own student_id.
+CREATE POLICY "guidance_requests: student inserts own"
+    ON guidance_requests FOR INSERT
+    WITH CHECK (student_id = my_student_id());
+
+-- RLS policies alone aren't enough -- Postgres also requires the base
+-- table-level GRANT before a role can attempt an operation at all.
+-- Every other table in this schema got that grant automatically by
+-- being created through Supabase's Table Editor UI; these two were
+-- created via raw SQL migrations, which doesn't auto-grant, so it's
+-- done explicitly here.
+GRANT SELECT ON student_duplicate_project_report TO authenticated;
+GRANT ALL ON student_duplicate_project_report TO service_role;
+
+GRANT SELECT, INSERT, UPDATE ON guidance_requests TO authenticated;
+GRANT ALL ON guidance_requests TO service_role;
 
 
 -- ============================================================
