@@ -189,80 +189,26 @@ watch(
   { immediate: true }
 );
 
-watch(
-  () => cohortFilter.value,
-  (newVal) => {
-    // Drive columnFilters directly (the actual v-model source of truth
-    // for the table) rather than going through tableApi.getColumn(),
-    // which depends on the template ref being ready at the moment this
-    // watcher fires.
-    const idx = columnFilters.value.findIndex((f) => f.id === 'cohort');
-    if (!newVal || newVal === 'all') {
-      if (idx !== -1) columnFilters.value.splice(idx, 1);
-    } else if (idx !== -1) {
-      columnFilters.value[idx] = { id: 'cohort', value: newVal };
-    } else {
-      columnFilters.value.push({ id: 'cohort', value: newVal });
-    }
+// Drives columnFilters directly (the table's actual v-model source of
+// truth) instead of going through tableApi.getColumn().setFilterValue(),
+// which depends on the template ref being ready at the exact moment a
+// watcher fires and could silently no-op. Shared by all four filters so
+// they can't drift back into two different (one fragile) patterns.
+function setColumnFilter(columnId: string, newVal: string) {
+  const idx = columnFilters.value.findIndex((f) => f.id === columnId);
+  if (!newVal || newVal === 'all') {
+    if (idx !== -1) columnFilters.value.splice(idx, 1);
+  } else if (idx !== -1) {
+    columnFilters.value[idx] = { id: columnId, value: newVal };
+  } else {
+    columnFilters.value.push({ id: columnId, value: newVal });
   }
-);
+}
 
-watch(
-  () => programFilter.value,
-  (newVal) => {
-    if (!table?.value?.tableApi) return;
-    if (newVal === 'all') {
-      table.value.tableApi.getColumn('program')?.setFilterValue(undefined)
-      return
-    }
-
-    const programColumn = table.value.tableApi.getColumn("program");
-
-    if (!programColumn) return;
-
-    if (newVal === "all") {
-      programColumn.setFilterValue(undefined);
-    } else {
-      programColumn.setFilterValue(newVal);
-    }
-  }
-);
-
-watch(
-  () => classFilter.value,
-  (newVal) => {
-    // Driven directly through columnFilters (the table's v-model source
-    // of truth), same robust approach used for the cohort filter.
-    const idx = columnFilters.value.findIndex((f) => f.id === 'studentClass');
-    if (!newVal || newVal === 'all') {
-      if (idx !== -1) columnFilters.value.splice(idx, 1);
-    } else if (idx !== -1) {
-      columnFilters.value[idx] = { id: 'studentClass', value: newVal };
-    } else {
-      columnFilters.value.push({ id: 'studentClass', value: newVal });
-    }
-  }
-);
-
-watch(
-  () => statusFilter.value,
-  (newVal) => {
-    if (!table?.value?.tableApi) return;
-    if (newVal === 'all') {
-      table.value.tableApi.getColumn('status')?.setFilterValue(undefined)
-      return
-    }
-
-    const statusColumn = table.value.tableApi.getColumn("status");
-    if (!statusColumn) return;
-
-    if (newVal === "all") {
-      statusColumn.setFilterValue(undefined);
-    } else {
-      statusColumn.setFilterValue(newVal);
-    }
-  }
-);
+watch(() => cohortFilter.value, (newVal) => setColumnFilter('cohort', newVal));
+watch(() => programFilter.value, (newVal) => setColumnFilter('program', newVal));
+watch(() => classFilter.value, (newVal) => setColumnFilter('studentClass', newVal));
+watch(() => statusFilter.value, (newVal) => setColumnFilter('status', newVal));
 
 const columns = [
   {
@@ -466,17 +412,6 @@ const onSelect = async (selectedRows: any[]) => {
       <div class="flex flex-col lg:flex-row items-center gap-4">
         <USelect
           size="md"
-          v-model="cohortFilter"
-          :items="cohortItems"
-          :ui="{
-            trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
-          }"
-          placeholder="Filter cohort"
-          class="min-w-52"
-        />
-
-        <USelect
-          size="md"
           v-model="programFilter"
           :items="[{ label: 'All', value: 'all' }, ...PROGRAM_OPTIONS]"
           :ui="{
@@ -488,12 +423,12 @@ const onSelect = async (selectedRows: any[]) => {
 
         <USelect
           size="md"
-          v-model="classFilter"
-          :items="[{ label: 'All', value: 'all' }, ...STUDENT_CLASS_OPTIONS]"
+          v-model="cohortFilter"
+          :items="cohortItems"
           :ui="{
             trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
           }"
-          placeholder="Filter class"
+          placeholder="Filter cohort"
           class="min-w-52"
         />
 
@@ -510,6 +445,17 @@ const onSelect = async (selectedRows: any[]) => {
             trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
           }"
           placeholder="Filter status"
+          class="min-w-52"
+        />
+
+        <USelect
+          size="md"
+          v-model="classFilter"
+          :items="[{ label: 'All', value: 'all' }, ...STUDENT_CLASS_OPTIONS]"
+          :ui="{
+            trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
+          }"
+          placeholder="Filter class"
           class="min-w-52"
         />
       </div>

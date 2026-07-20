@@ -350,6 +350,16 @@
 
     console.log("🔗 program_cohort_seasons query result:", { pcsData, pcsError });
 
+    // If the student already switched to a different season while this
+    // (async) call was still in flight, a slower older request could
+    // otherwise resolve AFTER a newer one and silently overwrite it with
+    // stale data -- exactly the "doesn't refresh until I switch again"
+    // symptom. Bail out here rather than applying outdated results.
+    if (selectedSeasonId.value !== seasonId) {
+      console.log("⏭️ Stale loadProjectsForSeason call (season changed since), discarding result");
+      return;
+    }
+
     if (pcsError || !pcsData) {
       // Don't fail silently into a blank timeline -- this happens when
       // program_cohort_seasons has no row for this exact
@@ -423,6 +433,11 @@
 
     console.log("🔍 Fetching projects for program_cohort_season_id:", programCohortSeasonId);
     console.log("📦 Project schedules query result:", { projectSchedules, scheduleError });
+
+    if (selectedSeasonId.value !== seasonId) {
+      console.log("⏭️ Stale loadProjectsForSeason call (season changed since), discarding result");
+      return;
+    }
 
     if (scheduleError) {
       console.error("❌ Error fetching project schedules:", scheduleError);
