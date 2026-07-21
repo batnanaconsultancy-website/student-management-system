@@ -388,6 +388,7 @@ const handleSendSlackMessage = () => {
                 <USelect
                   v-model="selectedStatus"
                   :items="statusOptions"
+                  value-key="value"
                   placeholder="Select status"
                 />
                 <template #footer>
