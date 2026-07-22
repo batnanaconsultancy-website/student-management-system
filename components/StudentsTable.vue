@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { getPaginationRowModel } from "@tanstack/vue-table";
-import { resolveComponent, ref, watch } from "vue";
+import { resolveComponent, ref, computed, watch } from "vue";
 import { STATUS_OPTIONS, PROGRAM_OPTIONS, STUDENT_CLASS_OPTIONS } from '~/constants/options'
 
 import * as z from 'zod'
@@ -190,25 +190,35 @@ watch(
 );
 
 // Drives columnFilters directly (the table's actual v-model source of
-// truth) instead of going through tableApi.getColumn().setFilterValue(),
-// which depends on the template ref being ready at the exact moment a
-// watcher fires and could silently no-op. Shared by all four filters so
-// they can't drift back into two different (one fragile) patterns.
+// truth) instead of going through tableApi.getColumn().setFilterValue().
+//
+// IMPORTANT: @nuxt/ui v4.x has confirmed, open reactivity bugs where
+// v-model:column-filters / v-model:sort / v-model:global-filter don't
+// reliably trigger UTable to re-filter even when the bound ref updates
+// correctly (nuxt/ui#5762, #5318, #3377). Always replacing the array
+// with a new reference (never .push/.splice in place) is part of the
+// fix; the :key binding on <UTable> below (tied to this same state) is
+// the other part -- forces a clean re-render when a filter changes,
+// matching the community-confirmed workaround for this exact issue.
 function setColumnFilter(columnId: string, newVal: string) {
-  const idx = columnFilters.value.findIndex((f) => f.id === columnId);
-  if (!newVal || newVal === 'all') {
-    if (idx !== -1) columnFilters.value.splice(idx, 1);
-  } else if (idx !== -1) {
-    columnFilters.value[idx] = { id: columnId, value: newVal };
-  } else {
-    columnFilters.value.push({ id: columnId, value: newVal });
+  const next = columnFilters.value.filter((f) => f.id !== columnId);
+  if (newVal && newVal !== 'all') {
+    next.push({ id: columnId, value: newVal });
   }
+  columnFilters.value = next;
 }
 
 watch(() => cohortFilter.value, (newVal) => setColumnFilter('cohort', newVal));
 watch(() => programFilter.value, (newVal) => setColumnFilter('program', newVal));
 watch(() => classFilter.value, (newVal) => setColumnFilter('studentClass', newVal));
 watch(() => statusFilter.value, (newVal) => setColumnFilter('status', newVal));
+
+// Forces <UTable> to fully re-render whenever the active filters change,
+// working around @nuxt/ui v4.x's confirmed v-model:column-filters
+// reactivity bug (see setColumnFilter above for details/links).
+const tableKey = computed(() =>
+  columnFilters.value.map((f) => `${f.id}:${f.value}`).join('|')
+);
 
 const columns = [
   {
@@ -462,6 +472,7 @@ const onSelect = async (selectedRows: any[]) => {
     </div>
 
     <UTable
+      :key="tableKey"
       sticky
       ref="table"
       v-model:column-filters="columnFilters"
