@@ -28,10 +28,19 @@ const mainLinks: NavigationMenuItem[] = [
     },
   },
   {
+    label: "Attendance",
+    to: "/admin/attendance",
+    ariaLabel: "Attendance",
+    icon: "i-lucide-clipboard-check",
+    tooltip: {
+      text: "Attendance",
+    },
+  },
+  {
     label: "Analytics",
     icon: "i-pajamas:chart",
     ariaLabel: "Analytics",
-    defaultOpen: true,
+    defaultOpen: false,
     to: "/admin/analytics/overall",
     type: "trigger",
     tooltip: {
@@ -63,7 +72,7 @@ const mainLinks: NavigationMenuItem[] = [
     label: "Managment",
     icon: "i-pajamas:issue-type-maintenance",
     ariaLabel: "Managment",
-    defaultOpen: true,
+    defaultOpen: false,
     to: "/admin/managment/students",
     type: "trigger",
     tooltip: {
