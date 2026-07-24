@@ -228,6 +228,24 @@
                   icon="i-pajamas:hourglass"
                   styles="2xl:min-h-[100px] lg:min-h-[80px]"
                 />
+                   <StudentDashboardStatCard
+                  :value="studentData.workshops_attended ?? 0"
+                  label="Workshops Attended"
+                  icon="i-pajamas:live-preview"
+                  styles="2xl:min-h-[100px] lg:min-h-[80px]"
+                />
+                   <StudentDashboardStatCard
+                  :value="studentData.standup_attended ?? 0"
+                  label="Stand-ups Attended"
+                  icon="i-pajamas:comment-lines"
+                  styles="2xl:min-h-[100px] lg:min-h-[80px]"
+                />
+                   <StudentDashboardStatCard
+                  :value="studentData.mentoring_attended ?? 0"
+                  label="Mentoring Attended"
+                  icon="i-pajamas:comment"
+                  styles="2xl:min-h-[100px] lg:min-h-[80px]"
+                />
               </UPageGrid>
            </div>
         </UPageGrid>
