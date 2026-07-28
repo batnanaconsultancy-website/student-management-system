@@ -90,12 +90,23 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Embedded AI Mentor -->
-        <iframe
+        <!-- <iframe
           v-show="!iframeFailed"
           :src="AI_MENTOR_URL"
           class="h-full w-full border-0"
           allow="camera; microphone; autoplay; clipboard-write"
           referrerpolicy="no-referrer-when-downgrade"
+          title="AI Mentor"
+          @load="handleIframeLoad"
+          @error="handleIframeError"
+        /> -->
+
+        <iframe
+          v-if="user?.email"
+          :src="AI_MENTOR_URL"
+          ref="iframeRef"
+          class="h-full w-full border-0"
+          allow="camera; microphone; autoplay; clipboard-write"
           title="AI Mentor"
           @load="handleIframeLoad"
           @error="handleIframeError"
