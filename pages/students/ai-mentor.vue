@@ -90,7 +90,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Embedded AI Mentor -->
-        <!-- <iframe
+        <iframe
           v-show="!iframeFailed"
           :src="AI_MENTOR_URL"
           class="h-full w-full border-0"
@@ -99,9 +99,9 @@ onBeforeUnmount(() => {
           title="AI Mentor"
           @load="handleIframeLoad"
           @error="handleIframeError"
-        /> -->
+        />
 
-        <iframe
+        <!-- <iframe
           v-if="user?.email"
           :src="AI_MENTOR_URL"
           ref="iframeRef"
@@ -110,7 +110,7 @@ onBeforeUnmount(() => {
           title="AI Mentor"
           @load="handleIframeLoad"
           @error="handleIframeError"
-        />
+        /> -->
       </div>
     </template>
   </UDashboardPanel>
