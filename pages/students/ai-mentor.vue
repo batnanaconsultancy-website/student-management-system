@@ -7,15 +7,47 @@ definePageMeta({
 // The external AI Mentor (Anam AI) experience.
 // Swap this for an env var (e.g. runtimeConfig.public.aiMentorUrl) if you'd
 // rather not hardcode it.
-const AI_MENTOR_URL = "https://render-version.onrender.com/";
+const AI_MENTOR_BASE_URL = "https://render-version.onrender.com/";
+
+const user = useSupabaseUser();
+
+// Auto-fill the student's email into the AI Mentor's login, so they don't
+// have to type it themselves. This can only work through a mechanism the
+// AI Mentor app itself supports -- we don't control that codebase, so we
+// try the two standard ways an embedded tool would accept this:
+//   1. A URL query param on the iframe src (?email=...), read by the
+//      AI Mentor's own login page on load.
+//   2. A postMessage sent to the iframe after it loads, in case it
+//      listens for that instead of (or in addition to) a query param.
+// If the AI Mentor supports neither, this is a no-op and the student
+// still sees its normal login screen -- nothing breaks either way.
+const AI_MENTOR_URL = computed(() => {
+  if (!user.value?.email) return AI_MENTOR_BASE_URL;
+  const url = new URL(AI_MENTOR_BASE_URL);
+  url.searchParams.set("email", user.value.email);
+  return url.toString();
+});
 
 const iframeLoaded = ref(false);
 const iframeFailed = ref(false);
 const loadTimeout = ref(null);
+const iframeRef = ref(null);
 
 function handleIframeLoad() {
   iframeLoaded.value = true;
   if (loadTimeout.value) clearTimeout(loadTimeout.value);
+
+  // Fallback path: postMessage the email to the iframe in case the AI
+  // Mentor listens for that instead of a query param. Sent to "*" since
+  // we don't control the target origin here -- the email is not
+  // sensitive enough (it's already visible in the URL bar via the query
+  // param above) to warrant withholding it over that.
+  if (user.value?.email && iframeRef.value?.contentWindow) {
+    iframeRef.value.contentWindow.postMessage(
+      { type: "sis-auto-login", email: user.value.email },
+      "*",
+    );
+  }
 }
 
 function handleIframeError() {
@@ -24,7 +56,7 @@ function handleIframeError() {
 }
 
 function openInNewTab() {
-  window.open(AI_MENTOR_URL, "_blank", "noopener,noreferrer");
+  window.open(AI_MENTOR_URL.value, "_blank", "noopener,noreferrer");
 }
 
 onMounted(() => {
@@ -92,6 +124,7 @@ onBeforeUnmount(() => {
         <!-- Embedded AI Mentor -->
         <iframe
           v-show="!iframeFailed"
+          ref="iframeRef"
           :src="AI_MENTOR_URL"
           class="h-full w-full border-0"
           allow="camera; microphone; autoplay; clipboard-write"
@@ -100,17 +133,6 @@ onBeforeUnmount(() => {
           @load="handleIframeLoad"
           @error="handleIframeError"
         />
-
-        <!-- <iframe
-          v-if="user?.email"
-          :src="AI_MENTOR_URL"
-          ref="iframeRef"
-          class="h-full w-full border-0"
-          allow="camera; microphone; autoplay; clipboard-write"
-          title="AI Mentor"
-          @load="handleIframeLoad"
-          @error="handleIframeError"
-        /> -->
       </div>
     </template>
   </UDashboardPanel>
