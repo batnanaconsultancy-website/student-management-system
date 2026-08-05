@@ -37,6 +37,11 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  // Appended after the count, e.g. "%"
+  suffix: {
+    type: String,
+    default: "",
+  },
 });
 
 const isLoading = computed(() => props.count === null || props.count === undefined);
@@ -91,7 +96,7 @@ const getIconColorClass = (iconColor) => {
       </template>
       <template v-else>
         <span class="text-2xl font-semibold text-highlighted">
-          {{ count }}
+          {{ count }}{{ suffix }}
         </span>
 
         <UBadge

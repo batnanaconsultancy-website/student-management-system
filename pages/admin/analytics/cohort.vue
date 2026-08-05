@@ -18,6 +18,7 @@ const sortOptions = [
   { label: 'Student Count', value: 'students' },
   { label: 'Overall Avg / Student', value: 'overall' },
   { label: 'Workshop Avg / Student', value: 'workshop' },
+  { label: 'Attendance % (vs top student)', value: 'pct' },
 ];
 
 onMounted(async () => {
@@ -49,6 +50,8 @@ const filteredCohorts = computed(() => {
         return (b.averages?.overall || 0) - (a.averages?.overall || 0);
       case 'workshop':
         return (b.averages?.workshop || 0) - (a.averages?.workshop || 0);
+      case 'pct':
+        return (b.percentages?.overall || 0) - (a.percentages?.overall || 0);
       default:
         return 0;
     }
@@ -88,11 +91,24 @@ const overallStats = computed(() => {
     }
   });
 
+  // Weighted average of each cohort's percentage-attendance (relative to
+  // that cohort's own top attendee), weighted by student count.
+  let pctSum = 0;
+  let pctWeight = 0;
+  dataByCohort.value.forEach(c => {
+    const studentCount = c.students_count || 0;
+    if (c.percentages?.overall != null) {
+      pctSum += c.percentages.overall * studentCount;
+      pctWeight += studentCount;
+    }
+  });
+
   return {
     totalCohorts: dataByCohort.value.length,
     totalStudents,
     avgOverallAttendance: overallWeight > 0 ? Math.round((overallSum / overallWeight) * 100) / 100 : null,
     avgWorkshopAttendance: workshopWeight > 0 ? Math.round((workshopSum / workshopWeight) * 100) / 100 : null,
+    avgAttendancePct: pctWeight > 0 ? Math.round((pctSum / pctWeight) * 100) / 100 : null,
   };
 });
 </script>
@@ -100,13 +116,13 @@ const overallStats = computed(() => {
 <template>
   <div class="space-y-6">
     <!-- Summary Cards -->
-    <div class="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-px">
+    <div class="grid grid-cols-1 gap-6 sm:grid-cols-3 lg:gap-px">
       <StudentStatCard
         title="Total Cohorts"
         :count="overallStats.totalCohorts"
         icon="i-pajamas:users"
         icon-color="info"
-        rounded-class="rounded-lg xl:rounded-none xl:rounded-l-lg"
+        rounded-class="rounded-lg sm:rounded-none sm:rounded-l-lg"
       />
 
       <StudentStatCard
@@ -114,7 +130,16 @@ const overallStats = computed(() => {
         :count="overallStats.totalStudents"
         icon="i-lucide:graduation-cap"
         icon-color="success"
-        rounded-class="rounded-lg xl:rounded-none xl:rounded-r-lg"
+        rounded-class="rounded-lg sm:rounded-none"
+      />
+
+      <StudentStatCard
+        title="Avg Attendance % (vs top student)"
+        :count="overallStats.avgAttendancePct"
+        suffix="%"
+        icon="i-lucide-percent"
+        icon-color="warning"
+        rounded-class="rounded-lg sm:rounded-none sm:rounded-r-lg"
       />
     </div>
 

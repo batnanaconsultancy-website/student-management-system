@@ -11,21 +11,35 @@ const stats = computed(() => [
     label: 'Workshop',
     value: props.cohort.attended?.workshop,
     avg: props.cohort.averages?.workshop,
+    pct: props.cohort.percentages?.workshop,
     icon: 'i-lucide-presentation',
   },
   {
     label: 'Standup',
     value: props.cohort.attended?.standup,
     avg: props.cohort.averages?.standup,
+    pct: props.cohort.percentages?.standup,
     icon: 'i-lucide-users',
   },
   {
     label: 'Mentoring',
     value: props.cohort.attended?.mentoring,
     avg: props.cohort.averages?.mentoring,
+    pct: props.cohort.percentages?.mentoring,
     icon: 'i-lucide-message-circle',
   },
 ]);
+
+const overallPct = computed(() => props.cohort.percentages?.overall);
+
+// Color-code the % badge so a glance at the grid shows who's trailing
+const pctColor = computed(() => {
+  const v = overallPct.value;
+  if (v == null) return 'neutral';
+  if (v >= 75) return 'success';
+  if (v >= 50) return 'warning';
+  return 'error';
+});
 </script>
 
 <template>
@@ -38,7 +52,7 @@ const stats = computed(() => [
     }"
   >
     <template #header>
-      <div class="flex items-start justify-between">
+      <div class="flex items-start justify-between gap-2">
         <div>
           <h3 class="text-lg font-semibold text-highlighted group-hover:text-primary transition-colors">
             {{ cohort.cohort_name }}
@@ -50,6 +64,16 @@ const stats = computed(() => [
             </span>
           </div>
         </div>
+
+        <UTooltip
+          arrow
+          text="Relative to this cohort's own top attendee (no 'expected sessions' count is tracked): each student's attended sessions ÷ the cohort's highest attended count, averaged across the cohort."
+          :delay-duration="0"
+        >
+          <UBadge :color="pctColor" variant="subtle" class="flex-shrink-0">
+            {{ overallPct ?? 0 }}%
+          </UBadge>
+        </UTooltip>
       </div>
     </template>
 
@@ -81,6 +105,9 @@ const stats = computed(() => [
           </p>
           <p class="text-xs text-muted">
             {{ stat.avg ?? 0 }} avg/student
+          </p>
+          <p class="text-xs text-muted">
+            {{ stat.pct ?? 0 }}% of top
           </p>
         </div>
       </div>

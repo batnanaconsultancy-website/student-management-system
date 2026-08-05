@@ -4,8 +4,15 @@ import { serverSupabaseClient } from '#supabase/server'
 // Note: this used to compute "attendance %" against expected counts from
 // cohort_meeting_stats / cohort_meetings / meeting_types -- tables nothing
 // in the real data pipeline ever populates, so every average came out
-// null. This now reports real, always-computable numbers per cohort:
-// total attended and average attended per student, per meeting type.
+// null. This reports real, always-computable numbers per cohort: total
+// attended and average attended per student, per meeting type.
+//
+// It also reports a "percentage attendance" figure. Since there's no
+// populated "expected sessions" table to use as a denominator, this is
+// defined relative to the cohort's own top attendee: for each student,
+// pct = their attended count / the highest attended count in their cohort.
+// The cohort's percentage is the average of that across its students.
+// This is a relative engagement measure, not literal "% of sessions held".
 export default defineEventHandler(async (event) => {
     try {
         const client = await serverSupabaseClient(event)
@@ -30,31 +37,81 @@ export default defineEventHandler(async (event) => {
             cohortNameMap.set(c.id, c.name)
         }
 
-        // Group students by cohort
-        const cohorts = new Map()
-        for (const s of students) {
-            const cid = s.cohort_id || 'unknown'
-            if (!cohorts.has(cid)) cohorts.set(cid, { students: [], totals: { workshops: 0, standups: 0, mentoring: 0 } })
-            const entry = cohorts.get(cid)
-            entry.students.push(s)
-            entry.totals.workshops += Number(s.workshops_attended || 0)
-            entry.totals.standups += Number(s.standup_attended || 0)
-            entry.totals.mentoring += Number(s.mentoring_attended || 0)
-        }
-
         function perStudent(sum, count) {
             return count > 0 ? Math.round((sum / count) * 100) / 100 : null
         }
 
-        // Build result per cohort
-        const result = []
-        for (const [cohortId, info] of cohorts.entries()) {
-            const studentsCount = info.students.length
-            const { workshops, standups, mentoring } = info.totals
+        // Percentage relative to the top attendee: value / max, as a 0-100 figure.
+        // If max is 0 (nobody in the group attended anything), treat everyone as 0%.
+        function pctOfMax(value, max) {
+            if (!max || max <= 0) return 0
+            return Math.round((value / max) * 10000) / 100
+        }
 
-            result.push({
-                cohort_id: cohortId,
-                cohort_name: cohortNameMap.get(cohortId) ?? null,
+        // Group students directly by cohort_name (some cohort names like
+        // 'Sep 2025' appear across multiple programs/cohort ids, and we want
+        // those combined into a single reported group, top-attendee included).
+        const grouped = new Map()
+        for (const s of students) {
+            const name = cohortNameMap.get(s.cohort_id) ?? s.cohort_id ?? 'Unknown Cohort'
+            if (!grouped.has(name)) {
+                grouped.set(name, { cohort_name: name, cohort_ids: new Set(), students: [] })
+            }
+            const g = grouped.get(name)
+            g.cohort_ids.add(s.cohort_id)
+            g.students.push(s)
+        }
+
+        const finalResult = []
+        for (const [name, g] of grouped.entries()) {
+            const studentsCount = g.students.length
+
+            let workshops = 0
+            let standups = 0
+            let mentoring = 0
+
+            let maxWorkshop = 0
+            let maxStandup = 0
+            let maxMentoring = 0
+            let maxOverall = 0
+
+            const perStudentTotals = []
+            for (const s of g.students) {
+                const w = Number(s.workshops_attended || 0)
+                const st = Number(s.standup_attended || 0)
+                const m = Number(s.mentoring_attended || 0)
+                const total = w + st + m
+
+                workshops += w
+                standups += st
+                mentoring += m
+
+                if (w > maxWorkshop) maxWorkshop = w
+                if (st > maxStandup) maxStandup = st
+                if (m > maxMentoring) maxMentoring = m
+                if (total > maxOverall) maxOverall = total
+
+                perStudentTotals.push({ w, st, m, total })
+            }
+
+            // Average each student's percentage-of-top-attendee, per type and overall
+            let pctOverallSum = 0
+            let pctWorkshopSum = 0
+            let pctStandupSum = 0
+            let pctMentoringSum = 0
+
+            for (const p of perStudentTotals) {
+                pctOverallSum += pctOfMax(p.total, maxOverall)
+                pctWorkshopSum += pctOfMax(p.w, maxWorkshop)
+                pctStandupSum += pctOfMax(p.st, maxStandup)
+                pctMentoringSum += pctOfMax(p.m, maxMentoring)
+            }
+
+            const avgPct = (sum) => studentsCount > 0 ? Math.round((sum / studentsCount) * 100) / 100 : null
+
+            finalResult.push({
+                cohort_name: name,
+                cohort_ids: Array.from(g.cohort_ids),
                 students_count: studentsCount,
                 attended: {
                     workshop: workshops,
@@ -67,43 +124,19 @@ export default defineEventHandler(async (event) => {
                     standup: perStudent(standups, studentsCount),
                     mentoring: perStudent(mentoring, studentsCount),
                 },
-            })
-        }
-
-        // Group results by cohort_name (some cohort names like 'Sep 2025' appear across multiple programs)
-        const grouped = new Map()
-        for (const item of result) {
-            const name = item.cohort_name ?? item.cohort_id ?? 'unknown'
-            if (!grouped.has(name)) {
-                grouped.set(name, {
-                    cohort_name: name,
-                    cohort_ids: new Set(),
-                    students_count: 0,
-                    attended: { workshop: 0, standup: 0, mentoring: 0 },
-                })
-            }
-
-            const g = grouped.get(name)
-            g.cohort_ids.add(item.cohort_id)
-            g.students_count += item.students_count || 0
-            g.attended.workshop += item.attended.workshop
-            g.attended.standup += item.attended.standup
-            g.attended.mentoring += item.attended.mentoring
-        }
-
-        const finalResult = []
-        for (const [name, g] of grouped.entries()) {
-            const { workshop, standup, mentoring } = g.attended
-            finalResult.push({
-                cohort_name: name,
-                cohort_ids: Array.from(g.cohort_ids),
-                students_count: g.students_count,
-                attended: g.attended,
-                averages: {
-                    overall: perStudent(workshop + standup + mentoring, g.students_count),
-                    workshop: perStudent(workshop, g.students_count),
-                    standup: perStudent(standup, g.students_count),
-                    mentoring: perStudent(mentoring, g.students_count),
+                // Percentage attendance relative to this cohort's own top attendee.
+                percentages: {
+                    overall: avgPct(pctOverallSum),
+                    workshop: avgPct(pctWorkshopSum),
+                    standup: avgPct(pctStandupSum),
+                    mentoring: avgPct(pctMentoringSum),
+                },
+                // Raw counts used as the 100% reference, for transparency in the UI.
+                top_attendee: {
+                    overall: maxOverall,
+                    workshop: maxWorkshop,
+                    standup: maxStandup,
+                    mentoring: maxMentoring,
                 },
             })
         }
