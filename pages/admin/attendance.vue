@@ -78,6 +78,13 @@ function sortIcon(key: string) {
   if (sortKey.value !== key) return 'i-lucide-chevrons-up-down'
   return sortDir.value === 'asc' ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'
 }
+
+function pctColor(pct: number | null | undefined) {
+  if (pct == null) return 'neutral'
+  if (pct >= 75) return 'success'
+  if (pct >= 50) return 'warning'
+  return 'error'
+}
 </script>
 
 <template>
@@ -153,6 +160,19 @@ function sortIcon(key: string) {
               <th class="text-right px-4 py-3 font-medium cursor-pointer select-none" @click="toggleSort('total_attended')">
                 <span class="inline-flex items-center gap-1">Total <UIcon :name="sortIcon('total_attended')" class="size-3.5" /></span>
               </th>
+              <th class="text-right px-4 py-3 font-medium cursor-pointer select-none" @click="toggleSort('cohort_pct')">
+                <span class="inline-flex items-center gap-1 justify-end">
+                  Attendance %
+                  <UTooltip
+                    arrow
+                    text="Relative to this student's own cohort: their total attended sessions ÷ their cohort's highest attended count. No 'expected sessions' count is tracked, so this is a relative engagement measure, not a literal percent of sessions held."
+                    :delay-duration="0"
+                  >
+                    <UIcon name="i-lucide-info" class="text-muted size-3.5 cursor-pointer" />
+                  </UTooltip>
+                  <UIcon :name="sortIcon('cohort_pct')" class="size-3.5" />
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody class="divide-y divide-default">
@@ -167,6 +187,17 @@ function sortIcon(key: string) {
               <td class="px-4 py-2.5 text-right">{{ s.standup_attended }}</td>
               <td class="px-4 py-2.5 text-right">{{ s.mentoring_attended }}</td>
               <td class="px-4 py-2.5 text-right font-medium">{{ s.total_attended }}</td>
+              <td class="px-4 py-2.5 text-right">
+                <UTooltip
+                  arrow
+                  :text="`Cohort's top attendee: ${s.cohort_top_attendee} sessions`"
+                  :delay-duration="0"
+                >
+                  <UBadge :color="pctColor(s.cohort_pct)" variant="subtle">
+                    {{ s.cohort_pct }}%
+                  </UBadge>
+                </UTooltip>
+              </td>
             </tr>
           </tbody>
         </table>
