@@ -37,6 +37,15 @@ const mainLinks: NavigationMenuItem[] = [
     },
   },
   {
+    label: "Canvas",
+    to: "/admin/canvas",
+    ariaLabel: "Canvas",
+    icon: "i-lucide-graduation-cap",
+    tooltip: {
+      text: "Canvas",
+    },
+  },
+  {
     label: "Analytics",
     icon: "i-pajamas:chart",
     ariaLabel: "Analytics",
