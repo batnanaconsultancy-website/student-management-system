@@ -220,3 +220,68 @@ export async function listAssignmentSubmissions(courseId, assignmentId) {
 export function isCanvasConfigured() {
   return isConfigured(getConfig());
 }
+
+/**
+ * Learning Mastery / Outcomes rollups for a course: per-student scores
+ * against every competency (Canvas "outcome") in the course, plus the
+ * outcome definitions themselves (title, mastery threshold) and their
+ * position in Canvas's outcome-group hierarchy. Powers the Competency
+ * Matrix tab.
+ *
+ * Canvas's /outcome_rollups endpoint returns a differently-shaped
+ * response than the other list endpoints here ({ rollups, linked }
+ * rather than a flat array), so it's paginated by hand rather than
+ * reusing getAllPages -- each page's `linked.outcomes` /
+ * `linked.outcome_paths` entries are merged and deduped by id as we go.
+ */
+export async function listOutcomeRollups(courseId) {
+  const cfg = getConfig();
+  assertConfigured(cfg);
+
+  const baseUrl = `https://${cfg.domain}/api/v1`;
+  const params = new URLSearchParams();
+  params.append("include[]", "outcomes");
+  params.append("include[]", "outcome_paths");
+  params.append("per_page", "100");
+  let url = `${baseUrl}/courses/${courseId}/outcome_rollups?${params.toString()}`;
+
+  const rollups = [];
+  const outcomesById = new Map();
+  const pathsById = new Map();
+
+  while (url) {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${cfg.token}` },
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      const err = new Error(
+        `Canvas API error ${response.status} for ${url}: ${body.slice(0, 300)}`
+      );
+      err.statusCode = response.status === 404 ? 404 : 502;
+      throw err;
+    }
+
+    const data = await response.json();
+    rollups.push(...(data.rollups || []));
+    for (const o of data.linked?.outcomes || []) outcomesById.set(o.id, o);
+    for (const p of data.linked?.outcome_paths || []) pathsById.set(p.id, p);
+
+    const linkHeader = response.headers.get("Link") || "";
+    let nextUrl = null;
+    for (const part of linkHeader.split(",")) {
+      if (part.includes('rel="next"')) {
+        const match = part.match(/<([^>]+)>/);
+        if (match) nextUrl = match[1];
+      }
+    }
+    url = nextUrl;
+  }
+
+  return {
+    rollups,
+    outcomes: [...outcomesById.values()],
+    paths: [...pathsById.values()],
+  };
+}

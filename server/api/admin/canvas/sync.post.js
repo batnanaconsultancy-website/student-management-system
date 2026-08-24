@@ -6,6 +6,7 @@ import {
   listCanvasStudents,
   listCanvasAssignments,
   listAssignmentSubmissions,
+  listOutcomeRollups,
 } from '~/server/utils/canvasApi'
 
 // POST /api/admin/canvas/sync
@@ -189,12 +190,87 @@ export default defineEventHandler(async (event) => {
       }
     }
 
+    // 5. Competencies (Canvas "outcomes") -- one Canvas request set for
+    // the whole course via outcome_rollups, unlike submissions which
+    // need one request per assignment.
+    const { rollups, outcomes, paths } = await listOutcomeRollups(canvasCourseId)
+    const pathByOutcomeId = new Map(paths.map((p) => [String(p.id), p]))
+
+    const outcomeRows = outcomes.map((o) => {
+      const path = pathByOutcomeId.get(String(o.id))
+      // outcome_paths gives the full chain from root group down to the
+      // outcome itself (parts[last]). The second-to-last part is the
+      // outcome's immediate parent group -- that's the section header
+      // shown in the Competency Matrix tab (e.g. "Machine Learning
+      // Modeling"). Falls back to the only part available, or
+      // "Ungrouped" if Canvas returned no path at all for this outcome.
+      const parts = path?.parts || []
+      const groupName = parts.length > 1 ? parts[parts.length - 2]?.name : parts[0]?.name
+      return {
+        canvas_course_id: canvasCourseId,
+        canvas_outcome_id: o.id,
+        title: o.title || `Outcome ${o.id}`,
+        group_name: groupName || 'Ungrouped',
+        mastery_points: o.mastery_points ?? null,
+        points_possible: o.points_possible ?? o.ratings?.[0]?.points ?? null,
+        synced_at: new Date().toISOString(),
+      }
+    })
+
+    if (outcomeRows.length > 0) {
+      const { error: outcomesError } = await supabase
+        .from('canvas_outcomes')
+        .upsert(outcomeRows, { onConflict: 'canvas_course_id,canvas_outcome_id' })
+      if (outcomesError) {
+        throw createError({ statusCode: 500, statusMessage: outcomesError.message })
+      }
+    }
+
+    const masteryPointsByOutcomeId = new Map(outcomeRows.map((o) => [o.canvas_outcome_id, o.mastery_points]))
+
+    const outcomeResultRows = []
+    for (const rollup of rollups) {
+      const canvasUserId = rollup.links?.user
+      const canvasStudentId = studentIdByCanvasUserId.get(Number(canvasUserId))
+      if (!canvasStudentId) continue // student not on the roster we synced (e.g. dropped/test student)
+
+      for (const s of rollup.scores || []) {
+        const outcomeId = Number(s.links?.outcome)
+        if (!outcomeId) continue
+        const masteryPoints = masteryPointsByOutcomeId.get(outcomeId)
+        const mastery = masteryPoints != null ? (s.score ?? 0) >= masteryPoints : Boolean(s.score)
+        outcomeResultRows.push({
+          canvas_course_id: canvasCourseId,
+          canvas_outcome_id: outcomeId,
+          canvas_student_id: canvasStudentId,
+          score: s.score ?? null,
+          mastery,
+          synced_at: new Date().toISOString(),
+        })
+      }
+    }
+
+    let outcomeResultCount = 0
+    if (outcomeResultRows.length > 0) {
+      const { error: outcomeResultsError } = await supabase
+        .from('canvas_outcome_results')
+        .upsert(outcomeResultRows, {
+          onConflict: 'canvas_course_id,canvas_outcome_id,canvas_student_id',
+        })
+      if (outcomeResultsError) {
+        throw createError({ statusCode: 500, statusMessage: outcomeResultsError.message })
+      }
+      outcomeResultCount = outcomeResultRows.length
+    }
+
     await writeAuditLog(supabase, user.email, 'sync_canvas_course', 'canvas_course', canvasCourseId,
       {
         course_name: course.name,
         students: rosterUsers.length,
         assignments: assignmentRows.length,
         submissions: submissionCount,
+        outcomes: outcomeRows.length,
+        outcome_results: outcomeResultCount,
       }, event)
 
     return {
@@ -204,6 +280,7 @@ export default defineEventHandler(async (event) => {
         studentsSynced: rosterUsers.length,
         assignmentsSynced: assignmentRows.length,
         submissionsSynced: submissionCount,
+        outcomesSynced: outcomeRows.length,
       },
     }
   } catch (err) {
