@@ -374,7 +374,7 @@ function groupBadgeColor(mastered: number, total: number) {
             No competency data synced for this course yet. Try "Sync Now" above.
           </div>
 
-          <div v-else class="rounded-lg border border-default divide-y divide-default overflow-hidden">
+          <div v-else class="rounded-lg border border-default divide-y divide-default">
             <div v-for="s in competencyStudents" :key="s.studentId">
               <!-- Student row -->
               <button
