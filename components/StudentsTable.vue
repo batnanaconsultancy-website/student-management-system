@@ -416,7 +416,7 @@ const onSelect = async (selectedRows: any[]) => {
         color="info"
         icon="i-lucide-search"
         :model-value="table?.tableApi?.getColumn('name')?.getFilterValue()"
-        class="min-w-58"
+        class="min-w-[13.05rem]"
         placeholder="Filter names..."
         @update:model-value="table?.tableApi?.getColumn('name')?.setFilterValue($event)"
       />
@@ -430,7 +430,7 @@ const onSelect = async (selectedRows: any[]) => {
             trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
           }"
           placeholder="Filter program"
-          class="min-w-52"
+          class="min-w-[11.7rem]"
         />
 
         <USelect
@@ -441,7 +441,7 @@ const onSelect = async (selectedRows: any[]) => {
             trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
           }"
           placeholder="Filter cohort"
-          class="min-w-52"
+          class="min-w-[11.7rem]"
         />
 
         <USelect
@@ -457,7 +457,7 @@ const onSelect = async (selectedRows: any[]) => {
             trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
           }"
           placeholder="Filter status"
-          class="min-w-52"
+          class="min-w-[11.7rem]"
         />
 
         <USelect
@@ -468,7 +468,7 @@ const onSelect = async (selectedRows: any[]) => {
             trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
           }"
           placeholder="Filter class"
-          class="min-w-52"
+          class="min-w-[11.7rem]"
         />
 
         <USelect
@@ -479,7 +479,7 @@ const onSelect = async (selectedRows: any[]) => {
             trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
           }"
           placeholder="Filter account status"
-          class="min-w-52"
+          class="min-w-[11.7rem]"
         />
       </div>
     </div>
