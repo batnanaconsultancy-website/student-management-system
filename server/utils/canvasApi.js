@@ -108,6 +108,15 @@ async function getAllPages(cfg, path, query = {}) {
  * passing it as an array causes Canvas's own API to 500. So this calls
  * once per type and merges + dedupes the results by course id.
  */
+/**
+ * Courses the configured Canvas token has teacher/TA/designer access to,
+ * PLUS any course IDs manually listed in CANVAS_EXTRA_COURSE_IDS (comma
+ * separated env var). The extra list exists because an account-admin
+ * Canvas token can often view/manage any course but isn't personally
+ * "enrolled" in most of them, so Canvas's own enrollment-based course
+ * list won't include those courses even though the token can access
+ * them directly by ID. Used to populate the course dropdown.
+ */
 export async function listCanvasCourses() {
   const cfg = getConfig();
   assertConfigured(cfg);
@@ -125,6 +134,28 @@ export async function listCanvasCourses() {
       if (c && !c.access_restricted_by_date) {
         coursesById.set(c.id, c);
       }
+    }
+  }
+
+  // Manually-listed extra course IDs, fetched directly (works even
+  // without a teacher/TA enrollment, as long as the token can view
+  // the course at all -- e.g. an account-level admin token).
+  const config = useRuntimeConfig();
+  const extraIds = (config.canvasExtraCourseIds || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  for (const id of extraIds) {
+    if (coursesById.has(Number(id))) continue; // already have it
+    try {
+      const course = await getCanvasCourse(id);
+      if (course && !course.errors) {
+        coursesById.set(course.id, course);
+      }
+    } catch (err) {
+      // Don't let one bad/inaccessible ID break the whole dropdown --
+      // just skip it silently, it'll simply be missing from the list.
     }
   }
 
