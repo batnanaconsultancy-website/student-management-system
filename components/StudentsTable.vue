@@ -141,6 +141,7 @@ const statusFilter = ref("all");
 const programFilter = ref("all");
 const cohortFilter = ref("all");
 const classFilter = ref("all");
+const accountStatusFilter = ref("all");
 const cohortItems = ref([]);
 const open = ref(false)
 const openModal = ref(false)
@@ -212,6 +213,7 @@ watch(() => cohortFilter.value, (newVal) => setColumnFilter('cohort', newVal));
 watch(() => programFilter.value, (newVal) => setColumnFilter('program', newVal));
 watch(() => classFilter.value, (newVal) => setColumnFilter('studentClass', newVal));
 watch(() => statusFilter.value, (newVal) => setColumnFilter('status', newVal));
+watch(() => accountStatusFilter.value, (newVal) => setColumnFilter('accountStatus', newVal));
 
 // Forces <UTable> to fully re-render whenever the active filters change,
 // working around @nuxt/ui v4.x's confirmed v-model:column-filters
@@ -466,6 +468,17 @@ const onSelect = async (selectedRows: any[]) => {
             trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
           }"
           placeholder="Filter class"
+          class="min-w-52"
+        />
+
+        <USelect
+          size="md"
+          v-model="accountStatusFilter"
+          :items="[{ label: 'All', value: 'all' }, ...STATUS_OPTIONS.map((s) => ({ label: s, value: s }))]"
+          :ui="{
+            trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-200',
+          }"
+          placeholder="Filter account status"
           class="min-w-52"
         />
       </div>
