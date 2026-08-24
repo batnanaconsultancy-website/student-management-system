@@ -99,18 +99,36 @@ async function getAllPages(cfg, path, query = {}) {
  * Courses the configured Canvas token has teacher/TA/designer access to.
  * Used to populate the course dropdown on the admin Canvas page.
  */
+/**
+ * Courses the configured Canvas token has teacher/TA/designer access to.
+ * Used to populate the course dropdown on the admin Canvas page.
+ *
+ * Canvas's /courses endpoint only accepts a single `enrollment_type`
+ * value per request (unlike `state[]`, which does accept an array) --
+ * passing it as an array causes Canvas's own API to 500. So this calls
+ * once per type and merges + dedupes the results by course id.
+ */
 export async function listCanvasCourses() {
   const cfg = getConfig();
   assertConfigured(cfg);
 
-  const courses = await getAllPages(cfg, "/courses", {
-    "enrollment_type[]": ["teacher", "ta", "designer"],
-    per_page: 100,
-    "state[]": ["available", "completed"],
-  });
+  const enrollmentTypes = ["teacher", "ta", "designer"];
+  const coursesById = new Map();
 
-  return courses
-    .filter((c) => c && !c.access_restricted_by_date)
+  for (const enrollmentType of enrollmentTypes) {
+    const courses = await getAllPages(cfg, "/courses", {
+      enrollment_type: enrollmentType,
+      per_page: 100,
+      "state[]": ["available", "completed"],
+    });
+    for (const c of courses) {
+      if (c && !c.access_restricted_by_date) {
+        coursesById.set(c.id, c);
+      }
+    }
+  }
+
+  return [...coursesById.values()]
     .map((c) => ({
       id: c.id,
       name: c.name,
