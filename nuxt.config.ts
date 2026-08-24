@@ -51,6 +51,8 @@ export default defineNuxtConfig({
     scraperUsername: process.env.SCRAPER_USERNAME,
     scraperPassword: process.env.SCRAPER_PASSWORD,
     googleClientId: process.env.GOOGLE_CLIENT_ID,
+    canvasDomain: process.env.CANVAS_DOMAIN,
+    canvasToken: process.env.CANVAS_TOKEN,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     // Shared secret with the AI Mentor (Anam) backend — required on the
     // `x-mentor-secret` header for /api/mentor/* server-to-server calls.
