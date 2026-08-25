@@ -133,6 +133,9 @@ const handleSendSlackMessage = (student) => {
 
           <!-- Season Progress -->
           <AdminStudentDetailsSeasonProgressTable :season-progress="seasonProgress" />
+
+          <!-- Attendance -->
+          <AdminStudentDetailsAttendanceCard :student="student" />
         </div>
     </template>
   </UDashboardPanel>
