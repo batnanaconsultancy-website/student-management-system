@@ -1,5 +1,6 @@
 import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
 import { isSeasonCompleted } from '~/server/utils/seasonCompletion'
+import { computeCohortAttendance } from '~/server/utils/cohortAttendance'
 
 export default defineEventHandler(async (event) => {
   try {
@@ -91,6 +92,11 @@ export default defineEventHandler(async (event) => {
     // Count completed seasons (using the same 75%-or-flagged rule as everywhere else)
     const completedSeasonsCount = seasonProgress.filter(sp => sp.is_completed).length
 
+    // Attendance, scored as a percentage relative to the top attendee in
+    // this student's own cohort (same calculation used on the admin
+    // student profile page, via the shared cohortAttendance util).
+    const cohortAttendance = await computeCohortAttendance(client, studentData)
+
     return {
       data: {
         ...studentData,
@@ -102,7 +108,8 @@ export default defineEventHandler(async (event) => {
         all_program_seasons: programSeasons || [],
         filtered_seasons: filteredSeasons,
         total_seasons: filteredSeasons.length,
-        completed_seasons: completedSeasonsCount
+        completed_seasons: completedSeasonsCount,
+        cohort_attendance: cohortAttendance
       }
     }
   } catch (err) {
