@@ -37,15 +37,6 @@ const mainLinks: NavigationMenuItem[] = [
     },
   },
   {
-  label: "Canvas Masters",
-  to: "/admin/canvas-masters",
-  ariaLabel: "Canvas Masters",
-  icon: "i-lucide-award",
-  tooltip: {
-    text: "Canvas Masters"
-  }
-},
-  {
     label: "Canvas",
     to: "/admin/canvas",
     ariaLabel: "Canvas",
@@ -54,6 +45,16 @@ const mainLinks: NavigationMenuItem[] = [
       text: "Canvas",
     },
   },
+  {
+    label: "Canvas Masters",
+    to: "/admin/canvas-masters",
+    ariaLabel: "Canvas Masters",
+    icon: "i-lucide-award",
+    tooltip: {
+      text: "Canvas Masters",
+    },
+  },
+
   {
     label: "Analytics",
     icon: "i-pajamas:chart",
