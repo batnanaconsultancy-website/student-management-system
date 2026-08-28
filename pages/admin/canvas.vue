@@ -245,6 +245,24 @@ function groupBadgeColor(mastered: number, total: number) {
         </p>
       </UCard>
 
+      <!-- Tabs -->
+      <div class="inline-flex rounded-lg border border-default p-1 mb-4 bg-elevated/30">
+        <button
+          class="px-3 py-1.5 text-sm rounded-md transition-colors"
+          :class="activeTab === 'submissions' ? 'bg-inverted text-inverted font-medium' : 'text-muted hover:text-highlighted'"
+          @click="activeTab = 'submissions'"
+        >
+          Submissions
+        </button>
+        <button
+          class="px-3 py-1.5 text-sm rounded-md transition-colors"
+          :class="activeTab === 'matrix' ? 'bg-inverted text-inverted font-medium' : 'text-muted hover:text-highlighted'"
+          @click="activeTab = 'matrix'"
+        >
+          Competency Matrix
+        </button>
+      </div>
+
       <!-- Empty state: no course chosen yet -->
       <div v-if="!selectedCourseId" class="text-center py-16">
         <UIcon name="i-lucide-bar-chart-3" class="size-10 text-muted mx-auto mb-3" />
@@ -256,43 +274,25 @@ function groupBadgeColor(mastered: number, total: number) {
       </div>
 
       <template v-else>
-        <!-- Summary stat cards -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-          <UCard>
-            <p class="text-xs text-muted uppercase tracking-wide">Students</p>
-            <p class="text-2xl font-semibold">{{ summary.studentCount }}</p>
-          </UCard>
-          <UCard>
-            <p class="text-xs text-muted uppercase tracking-wide">Assignments</p>
-            <p class="text-2xl font-semibold">{{ summary.assignmentCount }}</p>
-          </UCard>
-          <UCard>
-            <p class="text-xs text-muted uppercase tracking-wide">Submission Rate</p>
-            <p class="text-2xl font-semibold">{{ summary.submissionRate }}%</p>
-          </UCard>
-          <UCard>
-            <p class="text-xs text-muted uppercase tracking-wide">Competencies</p>
-            <p class="text-2xl font-semibold">{{ totalCompetencies }}</p>
-          </UCard>
-        </div>
-
-        <!-- Tabs -->
-        <div class="inline-flex rounded-lg border border-default p-1 mb-4 bg-elevated/30">
-          <button
-            class="px-3 py-1.5 text-sm rounded-md transition-colors"
-            :class="activeTab === 'submissions' ? 'bg-inverted text-inverted font-medium' : 'text-muted hover:text-highlighted'"
-            @click="activeTab = 'submissions'"
-          >
-            Submissions
-          </button>
-          <button
-            class="px-3 py-1.5 text-sm rounded-md transition-colors"
-            :class="activeTab === 'matrix' ? 'bg-inverted text-inverted font-medium' : 'text-muted hover:text-highlighted'"
-            @click="activeTab = 'matrix'"
-          >
-            Competency Matrix
-          </button>
-        </div>
+          <!-- Summary stat cards -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+            <UCard>
+              <p class="text-xs text-muted uppercase tracking-wide">Students</p>
+              <p class="text-2xl font-semibold">{{ summary.studentCount }}</p>
+            </UCard>
+            <UCard>
+              <p class="text-xs text-muted uppercase tracking-wide">Assignments</p>
+              <p class="text-2xl font-semibold">{{ summary.assignmentCount }}</p>
+            </UCard>
+            <UCard>
+              <p class="text-xs text-muted uppercase tracking-wide">Submission Rate</p>
+              <p class="text-2xl font-semibold">{{ summary.submissionRate }}%</p>
+            </UCard>
+            <UCard>
+              <p class="text-xs text-muted uppercase tracking-wide">Competencies</p>
+              <p class="text-2xl font-semibold">{{ totalCompetencies }}</p>
+            </UCard>
+          </div>
 
         <!-- ═══ Submissions tab ═══ -->
         <template v-if="activeTab === 'submissions'">

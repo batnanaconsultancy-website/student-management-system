@@ -1,27 +1,17 @@
 import { createError } from 'h3'
 import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
 import { writeAuditLog } from '~/server/utils/auditLog'
-import {
-  getCanvasCourse,
-  listCanvasStudents,
-  listCanvasAssignments,
-  listAssignmentSubmissions,
-  listOutcomeRollups,
-} from '~/server/utils/canvasApi'
+import { syncCanvasCourse } from '~/server/utils/canvasSync'
 
 // POST /api/admin/canvas/sync
 // Body: { canvasCourseId: number }
 //
-// Pulls the student roster, assignments, and submissions for one Canvas
-// course from the Canvas REST API and upserts them into canvas_students /
-// canvas_enrollments / canvas_assignments / canvas_submissions. Caller
-// must be an admin. This is what the "Sync Now" button on
-// pages/admin/canvas.vue calls.
-//
-// Order matters: students are upserted first so we have their internal
-// UUIDs (canvas_students.id) on hand before writing submissions, since
-// canvas_submissions.canvas_student_id is a foreign key to that table
-// rather than storing name/email inline on every submission row.
+// Pulls everything for ONE Canvas course and upserts it into your DB.
+// Caller must be an admin. This is what the "Sync Now" button on
+// pages/admin/canvas.vue calls. The actual pull-and-upsert logic lives
+// in server/utils/canvasSync.js, shared with Canvas Masters' account-wide
+// sync (server/api/admin/canvas-masters/sync.post.js) so both stay in
+// sync (pun intended) rather than drifting apart.
 export default defineEventHandler(async (event) => {
   const supabase = await serverSupabaseClient(event)
   const user = await serverSupabaseUser(event)
@@ -50,239 +40,20 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    // 1. Confirm the course exists / token has access.
-    const course = await getCanvasCourse(canvasCourseId)
-
-    // 2. Roster -> canvas_students + canvas_enrollments.
-    // studentIdByCanvasUserId maps Canvas's numeric user id -> our UUID,
-    // rebuilt from the upsert's returned rows so it covers students who
-    // were already in the table from a previous sync too.
-    const rosterUsers = await listCanvasStudents(canvasCourseId)
-    const studentIdByCanvasUserId = new Map()
-
-    if (rosterUsers.length > 0) {
-      const studentRows = rosterUsers.map((u) => ({
-        canvas_user_id: u.id,
-        name: u.name || u.short_name || null,
-        email: u.email || u.login_id || null,
-        synced_at: new Date().toISOString(),
-      }))
-
-      const { data: upsertedStudents, error: studentsError } = await supabase
-        .from('canvas_students')
-        .upsert(studentRows, { onConflict: 'canvas_user_id' })
-        .select('id, canvas_user_id')
-
-      if (studentsError) {
-        throw createError({ statusCode: 500, statusMessage: studentsError.message })
-      }
-
-      for (const row of upsertedStudents) {
-        studentIdByCanvasUserId.set(row.canvas_user_id, row.id)
-      }
-
-      const enrollmentRows = upsertedStudents.map((row) => ({
-        canvas_course_id: canvasCourseId,
-        canvas_student_id: row.id,
-        synced_at: new Date().toISOString(),
-      }))
-
-      const { error: enrollmentsError } = await supabase
-        .from('canvas_enrollments')
-        .upsert(enrollmentRows, { onConflict: 'canvas_course_id,canvas_student_id' })
-
-      if (enrollmentsError) {
-        throw createError({ statusCode: 500, statusMessage: enrollmentsError.message })
-      }
-    }
-
-    // 3. Assignments.
-    const assignments = await listCanvasAssignments(canvasCourseId)
-    const assignmentRows = assignments.map((a) => ({
-      canvas_course_id: canvasCourseId,
-      canvas_assignment_id: a.id,
-      name: a.name || `Assignment ${a.id}`,
-      due_at: a.due_at || null,
-      points_possible: a.points_possible ?? null,
-      synced_at: new Date().toISOString(),
-    }))
-
-    if (assignmentRows.length > 0) {
-      const { error: assignmentsError } = await supabase
-        .from('canvas_assignments')
-        .upsert(assignmentRows, { onConflict: 'canvas_course_id,canvas_assignment_id' })
-      if (assignmentsError) {
-        throw createError({ statusCode: 500, statusMessage: assignmentsError.message })
-      }
-    }
-
-    // 4. Submissions, one Canvas request per assignment (Canvas has no
-    // single "all submissions for a course" endpoint). Any submission
-    // from a user not already in studentIdByCanvasUserId (e.g. the
-    // Canvas "Test Student", or someone who's dropped the roster since)
-    // is upserted into canvas_students on the fly so no submission is lost.
-    let submissionCount = 0
-    for (const assignment of assignments) {
-      const submissions = await listAssignmentSubmissions(canvasCourseId, assignment.id)
-      const usableSubmissions = submissions.filter((s) => s.user_id || s.user?.id)
-
-      const missingUsers = usableSubmissions
-        .map((s) => s.user)
-        .filter((u) => u?.id && !studentIdByCanvasUserId.has(u.id))
-
-      if (missingUsers.length > 0) {
-        const dedupedRows = [...new Map(missingUsers.map((u) => [u.id, u])).values()].map((u) => ({
-          canvas_user_id: u.id,
-          name: u.name || u.short_name || null,
-          email: u.email || u.login_id || null,
-          synced_at: new Date().toISOString(),
-        }))
-
-        const { data: extraStudents, error: extraStudentsError } = await supabase
-          .from('canvas_students')
-          .upsert(dedupedRows, { onConflict: 'canvas_user_id' })
-          .select('id, canvas_user_id')
-
-        if (extraStudentsError) {
-          throw createError({ statusCode: 500, statusMessage: extraStudentsError.message })
-        }
-        for (const row of extraStudents) {
-          studentIdByCanvasUserId.set(row.canvas_user_id, row.id)
-        }
-      }
-
-      const submissionRows = usableSubmissions
-        .map((s) => {
-          const canvasUserId = s.user?.id ?? s.user_id
-          const canvasStudentId = studentIdByCanvasUserId.get(canvasUserId)
-          if (!canvasStudentId) return null // shouldn't happen after the backfill above
-          return {
-            canvas_course_id: canvasCourseId,
-            canvas_assignment_id: assignment.id,
-            canvas_student_id: canvasStudentId,
-            submission_type: s.submission_type || null,
-            submitted_at: s.submitted_at || null,
-            late: Boolean(s.late),
-            seconds_late: s.seconds_late || 0,
-            missing: Boolean(s.missing),
-            workflow_state: s.workflow_state || null,
-            attempt: s.attempt ?? null,
-            score: s.score ?? null,
-            grade: s.grade != null ? String(s.grade) : null,
-            graded_at: s.graded_at || null,
-            excused: Boolean(s.excused),
-            preview_url: s.preview_url || null,
-            synced_at: new Date().toISOString(),
-          }
-        })
-        .filter(Boolean)
-
-      if (submissionRows.length > 0) {
-        const { error: submissionsError } = await supabase
-          .from('canvas_submissions')
-          .upsert(submissionRows, {
-            onConflict: 'canvas_course_id,canvas_assignment_id,canvas_student_id',
-          })
-        if (submissionsError) {
-          throw createError({ statusCode: 500, statusMessage: submissionsError.message })
-        }
-        submissionCount += submissionRows.length
-      }
-    }
-
-    // 5. Competencies (Canvas "outcomes") -- one Canvas request set for
-    // the whole course via outcome_rollups, unlike submissions which
-    // need one request per assignment.
-    const { rollups, outcomes, paths } = await listOutcomeRollups(canvasCourseId)
-    const pathByOutcomeId = new Map(paths.map((p) => [String(p.id), p]))
-
-    const outcomeRows = outcomes.map((o) => {
-      const path = pathByOutcomeId.get(String(o.id))
-      // outcome_paths gives the full chain from root group down to the
-      // outcome itself (parts[last]). The second-to-last part is the
-      // outcome's immediate parent group -- that's the section header
-      // shown in the Competency Matrix tab (e.g. "Machine Learning
-      // Modeling"). Falls back to the only part available, or
-      // "Ungrouped" if Canvas returned no path at all for this outcome.
-      const parts = path?.parts || []
-      const groupName = parts.length > 1 ? parts[parts.length - 2]?.name : parts[0]?.name
-      return {
-        canvas_course_id: canvasCourseId,
-        canvas_outcome_id: o.id,
-        title: o.title || `Outcome ${o.id}`,
-        group_name: groupName || 'Ungrouped',
-        mastery_points: o.mastery_points ?? null,
-        points_possible: o.points_possible ?? o.ratings?.[0]?.points ?? null,
-        synced_at: new Date().toISOString(),
-      }
-    })
-
-    if (outcomeRows.length > 0) {
-      const { error: outcomesError } = await supabase
-        .from('canvas_outcomes')
-        .upsert(outcomeRows, { onConflict: 'canvas_course_id,canvas_outcome_id' })
-      if (outcomesError) {
-        throw createError({ statusCode: 500, statusMessage: outcomesError.message })
-      }
-    }
-
-    const masteryPointsByOutcomeId = new Map(outcomeRows.map((o) => [o.canvas_outcome_id, o.mastery_points]))
-
-    const outcomeResultRows = []
-    for (const rollup of rollups) {
-      const canvasUserId = rollup.links?.user
-      const canvasStudentId = studentIdByCanvasUserId.get(Number(canvasUserId))
-      if (!canvasStudentId) continue // student not on the roster we synced (e.g. dropped/test student)
-
-      for (const s of rollup.scores || []) {
-        const outcomeId = Number(s.links?.outcome)
-        if (!outcomeId) continue
-        const masteryPoints = masteryPointsByOutcomeId.get(outcomeId)
-        const mastery = masteryPoints != null ? (s.score ?? 0) >= masteryPoints : Boolean(s.score)
-        outcomeResultRows.push({
-          canvas_course_id: canvasCourseId,
-          canvas_outcome_id: outcomeId,
-          canvas_student_id: canvasStudentId,
-          score: s.score ?? null,
-          mastery,
-          synced_at: new Date().toISOString(),
-        })
-      }
-    }
-
-    let outcomeResultCount = 0
-    if (outcomeResultRows.length > 0) {
-      const { error: outcomeResultsError } = await supabase
-        .from('canvas_outcome_results')
-        .upsert(outcomeResultRows, {
-          onConflict: 'canvas_course_id,canvas_outcome_id,canvas_student_id',
-        })
-      if (outcomeResultsError) {
-        throw createError({ statusCode: 500, statusMessage: outcomeResultsError.message })
-      }
-      outcomeResultCount = outcomeResultRows.length
-    }
+    const summary = await syncCanvasCourse(supabase, canvasCourseId)
 
     await writeAuditLog(supabase, user.email, 'sync_canvas_course', 'canvas_course', canvasCourseId,
       {
-        course_name: course.name,
-        students: rosterUsers.length,
-        assignments: assignmentRows.length,
-        submissions: submissionCount,
-        outcomes: outcomeRows.length,
-        outcome_results: outcomeResultCount,
+        course_name: summary.courseName,
+        students: summary.studentsSynced,
+        assignments: summary.assignmentsSynced,
+        submissions: summary.submissionsSynced,
+        outcomes: summary.outcomesSynced,
+        outcome_results: summary.outcomeResultsSynced,
+        outcome_alignments: summary.outcomeAlignmentsSynced,
       }, event)
 
-    return {
-      data: {
-        courseId: canvasCourseId,
-        courseName: course.name,
-        studentsSynced: rosterUsers.length,
-        assignmentsSynced: assignmentRows.length,
-        submissionsSynced: submissionCount,
-        outcomesSynced: outcomeRows.length,
-      },
-    }
+    return { data: summary }
   } catch (err) {
     if (err.statusCode) throw err
     throw createError({ statusCode: 500, statusMessage: err.message || 'Canvas sync failed' })

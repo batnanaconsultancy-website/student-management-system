@@ -222,6 +222,142 @@ export function isCanvasConfigured() {
 }
 
 /**
+ * Finds a Canvas user account by email/login, searching the whole
+ * Canvas account -- not just courses the token happens to already be
+ * enrolled in. Requires the token to have account-admin rights on the
+ * account given by CANVAS_ACCOUNT_ID (defaults to "self", which works
+ * when the token's own account is the relevant root account).
+ *
+ * Used by Canvas Masters to resolve a roster student's Canvas user id
+ * from their email alone, before we know which courses they're in.
+ */
+export async function findCanvasUserByEmail(email) {
+  const cfg = getConfig();
+  assertConfigured(cfg);
+  const config = useRuntimeConfig();
+  const accountId = config.canvasAccountId || "self";
+
+  const users = await getAllPages(cfg, `/accounts/${accountId}/users`, {
+    search_term: email,
+    per_page: 10,
+  });
+
+  // search_term does a fuzzy match (name or email), so confirm we got
+  // an exact login/email match rather than trusting the first result.
+  const lower = email.toLowerCase();
+  return (
+    users.find(
+      (u) =>
+        (u.email || "").toLowerCase() === lower ||
+        (u.login_id || "").toLowerCase() === lower
+    ) || null
+  );
+}
+
+/**
+ * Every course a given Canvas user is enrolled in as a student, across
+ * the WHOLE account -- not scoped to any one course. This is what lets
+ * Canvas Masters discover "all the courses this student is enrolled
+ * in" directly from Canvas rather than only courses an admin happened
+ * to sync individually first. Also requires account-admin rights.
+ */
+export async function listUserEnrollments(canvasUserId) {
+  const cfg = getConfig();
+  assertConfigured(cfg);
+  return getAllPages(cfg, `/users/${canvasUserId}/enrollments`, {
+    "type[]": ["StudentEnrollment"],
+    per_page: 100,
+  });
+}
+
+/**
+ * Which assignments count toward which learning outcome, derived from
+ * Canvas's /outcome_results endpoint (NOT /outcome_rollups -- rollups
+ * only give a per-student aggregate score per outcome, with no record
+ * of which specific assignment produced it; outcome_results gives the
+ * individual assessment events, each with an "alignment" pointing at
+ * the assessed item).
+ *
+ * Canvas's alignment object doesn't always expose a clean
+ * `assignment_id` field directly, so this extracts it from the
+ * alignment's `html_url` (which reliably follows the pattern
+ * `/courses/:id/assignments/:id` when the outcome was assessed via an
+ * assignment/rubric) rather than relying on a specific JSON field that
+ * may not always be present. Alignments that aren't assignments at all
+ * (e.g. quiz-only or manually-entered outcome results with no
+ * assignment behind them) are simply skipped.
+ *
+ * Returns [{ outcomeId, assignmentId }], deduplicated.
+ */
+export async function listOutcomeAlignments(courseId) {
+  const cfg = getConfig();
+  assertConfigured(cfg);
+
+  const baseUrl = `https://${cfg.domain}/api/v1`;
+  const params = new URLSearchParams();
+  params.append("include[]", "alignments");
+  params.append("per_page", "100");
+  let url = `${baseUrl}/courses/${courseId}/outcome_results?${params.toString()}`;
+
+  const results = [];
+  const alignmentsById = new Map();
+
+  while (url) {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${cfg.token}` },
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      const err = new Error(
+        `Canvas API error ${response.status} for ${url}: ${body.slice(0, 300)}`
+      );
+      err.statusCode = response.status === 404 ? 404 : 502;
+      throw err;
+    }
+
+    const data = await response.json();
+    results.push(...(data.outcome_results || []));
+    for (const a of data.linked?.alignments || []) alignmentsById.set(a.id, a);
+
+    const linkHeader = response.headers.get("Link") || "";
+    let nextUrl = null;
+    for (const part of linkHeader.split(",")) {
+      if (part.includes('rel="next"')) {
+        const match = part.match(/<([^>]+)>/);
+        if (match) nextUrl = match[1];
+      }
+    }
+    url = nextUrl;
+  }
+
+  const assignmentIdFromUrl = (htmlUrl) => {
+    if (!htmlUrl) return null;
+    const match = htmlUrl.match(/\/assignments\/(\d+)/);
+    return match ? Number(match[1]) : null;
+  };
+
+  const pairs = new Map(); // dedupe key `${outcomeId}::${assignmentId}` -> pair
+
+  for (const result of results) {
+    const outcomeId = result.links?.learning_outcome;
+    const alignmentId = result.links?.alignment;
+    if (!outcomeId || !alignmentId) continue;
+
+    const alignment = alignmentsById.get(alignmentId);
+    const assignmentId = assignmentIdFromUrl(alignment?.html_url);
+    if (!assignmentId) continue; // not an assignment-backed alignment (e.g. quiz or manual entry)
+
+    const key = `${outcomeId}::${assignmentId}`;
+    if (!pairs.has(key)) {
+      pairs.set(key, { outcomeId: Number(outcomeId), assignmentId });
+    }
+  }
+
+  return [...pairs.values()];
+}
+
+/**
  * Learning Mastery / Outcomes rollups for a course: per-student scores
  * against every competency (Canvas "outcome") in the course, plus the
  * outcome definitions themselves (title, mastery threshold) and their
