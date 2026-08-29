@@ -52,10 +52,12 @@ async function syncFromCanvas() {
     const res = await $fetch('/api/admin/canvas-masters/sync', { method: 'POST', body: {} })
     lastCanvasSyncSummary.value = res?.data
     const coursesCount = res.data.coursesSynced.length
+    const skippedCount = res.data.coursesSkipped?.length || 0
     const unresolvedCount = res.data.studentsUnresolved.length
     showSuccess(
       'Synced from Canvas',
       `${res.data.studentsResolved} students resolved, ${coursesCount} course${coursesCount === 1 ? '' : 's'} synced` +
+        (skippedCount > 0 ? `, ${skippedCount} skipped (synced recently)` : '') +
         (unresolvedCount > 0 ? ` (${unresolvedCount} email${unresolvedCount === 1 ? '' : 's'} not found on Canvas)` : '')
     )
     await fetchRoster()
@@ -177,13 +179,21 @@ const summary = computed(() => {
               color="primary"
               size="sm"
               :loading="canvasSyncing"
+              :disabled="canvasSyncing"
               @click="syncFromCanvas"
             />
           </div>
         </div>
-        <p v-if="lastCanvasSyncSummary" class="text-xs text-muted mt-3">
+        <p v-if="canvasSyncing" class="text-xs text-muted mt-3">
+          <UIcon name="i-lucide-refresh-cw" class="size-3.5 animate-spin inline mr-1" />
+          Resolving 24 students and syncing their courses — this can take a couple of minutes.
+        </p>
+        <p v-else-if="lastCanvasSyncSummary" class="text-xs text-muted mt-3">
           Last Canvas sync: {{ lastCanvasSyncSummary.studentsResolved }} students resolved,
           {{ lastCanvasSyncSummary.coursesSynced.length }} course{{ lastCanvasSyncSummary.coursesSynced.length === 1 ? '' : 's' }} synced
+          <template v-if="lastCanvasSyncSummary.coursesSkipped?.length > 0">
+            · {{ lastCanvasSyncSummary.coursesSkipped.length }} skipped (synced recently)
+          </template>
           <template v-if="lastCanvasSyncSummary.studentsUnresolved.length > 0">
             · {{ lastCanvasSyncSummary.studentsUnresolved.length }} email{{ lastCanvasSyncSummary.studentsUnresolved.length === 1 ? '' : 's' }} not found on Canvas ({{ lastCanvasSyncSummary.studentsUnresolved.join(', ') }})
           </template>
