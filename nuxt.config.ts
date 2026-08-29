@@ -53,6 +53,7 @@ export default defineNuxtConfig({
     googleClientId: process.env.GOOGLE_CLIENT_ID,
     canvasDomain: process.env.CANVAS_DOMAIN,
     canvasToken: process.env.CANVAS_TOKEN,
+    canvasAccountId: process.env.CANVAS_ACCOUNT_ID,
     canvasExtraCourseIds: process.env.CANVAS_EXTRA_COURSE_IDS,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     // Shared secret with the AI Mentor (Anam) backend — required on the

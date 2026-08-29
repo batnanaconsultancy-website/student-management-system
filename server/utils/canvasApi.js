@@ -20,7 +20,10 @@
 
 function getConfig() {
   const config = useRuntimeConfig();
-  const domain = (config.canvasDomain || "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  const domain = (config.canvasDomain || "")
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "");
   const token = config.canvasToken || "";
   return { domain, token };
 }
@@ -32,7 +35,7 @@ function isConfigured(cfg) {
 function assertConfigured(cfg) {
   if (!isConfigured(cfg)) {
     const err = new Error(
-      "Canvas sync isn't configured. Set CANVAS_DOMAIN and CANVAS_TOKEN in the server environment."
+      "Canvas sync isn't configured. Set CANVAS_DOMAIN and CANVAS_TOKEN in the server environment.",
     );
     err.statusCode = 501;
     throw err;
@@ -67,9 +70,10 @@ async function getAllPages(cfg, path, query = {}) {
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       const err = new Error(
-        `Canvas API error ${response.status} for ${url}: ${body.slice(0, 300)}`
+        `Canvas API error ${response.status} for ${url}: ${body.slice(0, 300)}`,
       );
-      err.statusCode = response.status === 404 ? 404 : 502;
+      // err.statusCode = response.status === 404 ? 404 : 502;
+      err.statusCode = response.status;
       throw err;
     }
 
@@ -172,12 +176,16 @@ export async function listCanvasCourses() {
 export async function getCanvasCourse(courseId) {
   const cfg = getConfig();
   assertConfigured(cfg);
-  const response = await fetch(`https://${cfg.domain}/api/v1/courses/${courseId}`, {
-    headers: { Authorization: `Bearer ${cfg.token}` },
-  });
+  const response = await fetch(
+    `https://${cfg.domain}/api/v1/courses/${courseId}`,
+    {
+      headers: { Authorization: `Bearer ${cfg.token}` },
+    },
+  );
   if (!response.ok) {
     const err = new Error(`Could not fetch course ${courseId} from Canvas`);
-    err.statusCode = response.status === 404 ? 404 : 502;
+    // err.statusCode = response.status === 404 ? 404 : 502;
+    err.statusCode = response.status;
     throw err;
   }
   return response.json();
@@ -200,7 +208,9 @@ export async function listCanvasStudents(courseId) {
 export async function listCanvasAssignments(courseId) {
   const cfg = getConfig();
   assertConfigured(cfg);
-  return getAllPages(cfg, `/courses/${courseId}/assignments`, { per_page: 100 });
+  return getAllPages(cfg, `/courses/${courseId}/assignments`, {
+    per_page: 100,
+  });
 }
 
 /**
@@ -213,7 +223,7 @@ export async function listAssignmentSubmissions(courseId, assignmentId) {
   return getAllPages(
     cfg,
     `/courses/${courseId}/assignments/${assignmentId}/submissions`,
-    { "include[]": ["user"], per_page: 100 }
+    { "include[]": ["user"], per_page: 100 },
   );
 }
 
@@ -249,7 +259,7 @@ export async function findCanvasUserByEmail(email) {
     users.find(
       (u) =>
         (u.email || "").toLowerCase() === lower ||
-        (u.login_id || "").toLowerCase() === lower
+        (u.login_id || "").toLowerCase() === lower,
     ) || null
   );
 }
@@ -310,9 +320,10 @@ export async function listOutcomeAlignments(courseId) {
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       const err = new Error(
-        `Canvas API error ${response.status} for ${url}: ${body.slice(0, 300)}`
+        `Canvas API error ${response.status} for ${url}: ${body.slice(0, 300)}`,
       );
-      err.statusCode = response.status === 404 ? 404 : 502;
+      // err.statusCode = response.status === 404 ? 404 : 502;
+      err.statusCode = response.status;
       throw err;
     }
 
@@ -393,9 +404,10 @@ export async function listOutcomeRollups(courseId) {
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       const err = new Error(
-        `Canvas API error ${response.status} for ${url}: ${body.slice(0, 300)}`
+        `Canvas API error ${response.status} for ${url}: ${body.slice(0, 300)}`,
       );
-      err.statusCode = response.status === 404 ? 404 : 502;
+      // err.statusCode = response.status === 404 ? 404 : 502;
+      err.statusCode = response.status;
       throw err;
     }
 
