@@ -37,13 +37,11 @@ const mainLinks: NavigationMenuItem[] = [
     },
   },
   {
-    label: "Canvas",
+    label: "Canvas Bachelors",
     to: "/admin/canvas",
-    ariaLabel: "Canvas",
+    ariaLabel: "Canvas Bachelors",
     icon: "i-lucide-graduation-cap",
-    tooltip: {
-      text: "Canvas",
-    },
+    tooltip: { text: "Canvas Bachelors" },
   },
   {
     label: "Canvas Masters",
