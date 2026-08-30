@@ -165,6 +165,21 @@ export default defineEventHandler(async (event) => {
   await writeAuditLog(supabase, user.email, 'sync_canvas_attendance_sheet', 'canvas_sheet_attendance', null,
     { students_synced: attendanceRows.length }, event)
 
+  // Record when this finished, so the page can show "Attendance last
+  // synced: <date>" instead of needing a destructive "clear" action --
+  // re-running this is always safe (upserts on email), there's just
+  // nothing to clear.
+  await supabase
+    .from('canvas_masters_sync_status')
+    .upsert(
+      {
+        sync_key: 'attendance',
+        last_synced_at: new Date().toISOString(),
+        summary: { students_synced: attendanceRows.length },
+      },
+      { onConflict: 'sync_key' }
+    )
+
   return {
     data: {
       studentsSynced: attendanceRows.length,

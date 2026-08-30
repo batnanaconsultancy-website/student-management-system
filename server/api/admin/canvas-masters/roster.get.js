@@ -52,7 +52,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: labelsError.message })
   }
   if (!labels || labels.length === 0) {
-    return { data: { students: [] } }
+    return { data: { students: [], syncStatus: { canvas: null, attendance: null } } }
   }
 
   const rosterEmails = labels.map((l) => l.email.toLowerCase())
@@ -101,6 +101,7 @@ export default defineEventHandler(async (event) => {
     { data: assignments, error: assignmentsError },
     { data: submissions, error: submissionsError },
     { data: sheetAttendance, error: attendanceError },
+    { data: syncStatusRows, error: syncStatusError },
   ] = await Promise.all([
     courseIds.length > 0
       ? supabase.from('canvas_courses').select('canvas_course_id, name').in('canvas_course_id', courseIds)
@@ -118,13 +119,20 @@ export default defineEventHandler(async (event) => {
       ? supabase.from('canvas_submissions').select('canvas_course_id, canvas_assignment_id, canvas_student_id, workflow_state, submitted_at, late').in('canvas_student_id', syncedStudentIds)
       : Promise.resolve({ data: [], error: null }),
     supabase.from('canvas_sheet_attendance').select('email, meetings_attended, total_duration_minutes').in('email', rosterEmails),
+    supabase.from('canvas_masters_sync_status').select('sync_key, last_synced_at'),
   ])
 
   for (const [name, err] of [
     ['courses', coursesError], ['outcomes', outcomesError], ['alignments', alignmentsError],
     ['assignments', assignmentsError], ['submissions', submissionsError], ['attendance', attendanceError],
+    ['syncStatus', syncStatusError],
   ]) {
     if (err) throw createError({ statusCode: 500, statusMessage: `${name}: ${err.message}` })
+  }
+
+  const syncStatus = {
+    canvas: syncStatusRows?.find((r) => r.sync_key === 'canvas')?.last_synced_at || null,
+    attendance: syncStatusRows?.find((r) => r.sync_key === 'attendance')?.last_synced_at || null,
   }
 
   const attendanceByEmail = new Map((sheetAttendance || []).map((a) => [a.email.toLowerCase(), a]))
@@ -247,5 +255,5 @@ export default defineEventHandler(async (event) => {
     return aKey.localeCompare(bKey)
   })
 
-  return { data: { students: result } }
+  return { data: { students: result, syncStatus } }
 })

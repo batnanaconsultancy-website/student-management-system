@@ -24,6 +24,7 @@ definePageMeta({
 const { showSuccess, showError } = useNotifications()
 
 const students = ref<any[]>([])
+const syncStatus = ref<{ canvas: string | null; attendance: string | null }>({ canvas: null, attendance: null })
 const loading = ref(false)
 const error = ref<string | null>(null)
 const search = ref('')
@@ -34,6 +35,7 @@ const syncProgress = ref<{ stage: string; current: number; total: number; label:
 
 const expandedStudentId = ref<string | null>(null)
 const expandedCourseKey = ref<string | null>(null)
+const expandedOutcomeGroupKey = ref<string | null>(null)
 const expandedOutcomeKey = ref<string | null>(null)
 
 async function fetchRoster() {
@@ -42,6 +44,7 @@ async function fetchRoster() {
   try {
     const res = await $fetch('/api/admin/canvas-masters/roster')
     students.value = res?.data?.students || []
+    syncStatus.value = res?.data?.syncStatus || { canvas: null, attendance: null }
   } catch (err: any) {
     error.value = err?.data?.statusMessage || err.message
   } finally {
@@ -118,6 +121,19 @@ async function syncFromCanvas() {
     }
 
     lastCanvasSyncSummary.value = { studentsResolved, studentsUnresolved: unresolvedEmails, coursesSynced }
+
+    // Record completion for the "last synced" label. Best-effort: if
+    // this write fails for some reason, it shouldn't undo the fact that
+    // the sync itself succeeded, so it's not wrapped in the outer catch.
+    try {
+      await $fetch('/api/admin/canvas-masters/mark-canvas-synced', {
+        method: 'POST',
+        body: { studentsResolved, studentsUnresolved: unresolvedEmails, coursesSynced: coursesSynced.map((c) => c.courseId) },
+      })
+    } catch {
+      // non-critical, ignore
+    }
+
     showSuccess(
       'Synced from Canvas',
       `${studentsResolved} students resolved, ${coursesSynced.length} course${coursesSynced.length === 1 ? '' : 's'} synced` +
@@ -165,12 +181,20 @@ onMounted(fetchRoster)
 function toggleStudent(studentId: string) {
   expandedStudentId.value = expandedStudentId.value === studentId ? null : studentId
   expandedCourseKey.value = null
+  expandedOutcomeGroupKey.value = null
   expandedOutcomeKey.value = null
 }
 
 function toggleCourse(studentId: string, courseId: number) {
   const key = `${studentId}::${courseId}`
   expandedCourseKey.value = expandedCourseKey.value === key ? null : key
+  expandedOutcomeGroupKey.value = null
+  expandedOutcomeKey.value = null
+}
+
+function toggleOutcomeGroup(studentId: string, courseId: number, groupName: string) {
+  const key = `${studentId}::${courseId}::${groupName}`
+  expandedOutcomeGroupKey.value = expandedOutcomeGroupKey.value === key ? null : key
   expandedOutcomeKey.value = null
 }
 
@@ -179,10 +203,47 @@ function toggleOutcome(studentId: string, courseId: number, outcomeId: number) {
   expandedOutcomeKey.value = expandedOutcomeKey.value === key ? null : key
 }
 
+// Canvas courses can define dozens of very granular outcomes (a real
+// example: 48 for one course). Shown as one flat list they're hard to
+// scan, so this groups them by group_name -- the same field the
+// Competency Matrix tab on the regular Canvas page already uses for its
+// section headers (e.g. "Machine Learning Modeling") -- so a course's
+// outcomes read as a handful of named categories you can drill into,
+// not 48 undifferentiated rows.
+function groupOutcomes(outcomes: any[]) {
+  const groups = new Map<string, any[]>()
+  for (const o of outcomes) {
+    const key = o.groupName || 'Ungrouped'
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(o)
+  }
+  return [...groups.entries()].map(([groupName, groupOutcomesList]) => {
+    const totalAssignments = groupOutcomesList.reduce((sum, o) => sum + o.assignments.length, 0)
+    const submittedAssignments = groupOutcomesList.reduce(
+      (sum, o) => sum + o.assignments.filter((a: any) => a.submitted).length,
+      0
+    )
+    return { groupName, outcomes: groupOutcomesList, totalAssignments, submittedAssignments }
+  })
+}
+
 function formatMinutes(mins: number) {
   const h = Math.floor(mins / 60)
   const m = Math.round(mins % 60)
   return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+function formatSyncDate(iso: string) {
+  const date = new Date(iso)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.round(diffMs / 60000)
+  if (diffMins < 1) return 'just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  const diffHours = Math.round(diffMins / 60)
+  if (diffHours < 24) return `${diffHours}h ago`
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) +
+    ' at ' + date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
 const filteredStudents = computed(() => {
@@ -213,42 +274,51 @@ const summary = computed(() => {
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
+        <template #right>
+          <UButton
+            label="Sync Attendance Sheet"
+            icon="i-lucide-calendar-clock"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+            :loading="attendanceSyncing"
+            @click="syncAttendanceSheet"
+          />
+          <UButton
+            label="Sync From Canvas"
+            icon="i-lucide-refresh-cw"
+            color="primary"
+            size="sm"
+            :loading="canvasSyncing"
+            :disabled="canvasSyncing"
+            @click="syncFromCanvas"
+          />
+        </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <!-- Header + sync actions -->
-      <UCard variant="subtle" class="mb-6" :ui="{ body: '!py-4' }">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <p class="font-medium text-highlighted text-sm">Masters Roster</p>
-            <p class="text-xs text-muted mt-0.5">
-              Every masters student, resolved directly from Canvas — their courses, learning
-              outcomes, submissions, and meeting attendance.
-            </p>
-          </div>
-          <div class="flex items-center gap-2">
-            <UButton
-              label="Sync Attendance Sheet"
-              icon="i-lucide-calendar-clock"
-              color="neutral"
-              variant="subtle"
-              size="sm"
-              :loading="attendanceSyncing"
-              @click="syncAttendanceSheet"
-            />
-            <UButton
-              label="Sync From Canvas"
-              icon="i-lucide-refresh-cw"
-              color="primary"
-              size="sm"
-              :loading="canvasSyncing"
-              :disabled="canvasSyncing"
-              @click="syncFromCanvas"
-            />
-          </div>
-        </div>
-        <p v-if="canvasSyncing && syncProgress" class="text-xs text-muted mt-3">
+      <!-- Last-synced status line. No "clear before syncing" action --
+           every sync is an upsert on Canvas's own IDs (or on email for
+           attendance), so re-syncing just refreshes existing rows
+           rather than duplicating anything. This is here so it's clear
+           at a glance how fresh the data on screen is. -->
+      <div class="flex items-center gap-4 flex-wrap text-xs text-muted mb-4">
+        <span class="flex items-center gap-1.5">
+          <UIcon name="i-lucide-graduation-cap" class="size-3.5" />
+          Canvas data: {{ syncStatus.canvas ? `last synced ${formatSyncDate(syncStatus.canvas)}` : 'never synced' }}
+        </span>
+        <span class="flex items-center gap-1.5">
+          <UIcon name="i-lucide-calendar-clock" class="size-3.5" />
+          Attendance: {{ syncStatus.attendance ? `last synced ${formatSyncDate(syncStatus.attendance)}` : 'never synced' }}
+        </span>
+      </div>
+
+      <!-- Live progress while "Sync From Canvas" is running, since it's
+           orchestrated as many small requests and can take a while for
+           a large roster. -->
+      <UCard v-if="canvasSyncing && syncProgress" variant="subtle" class="mb-6" :ui="{ body: '!py-3' }">
+        <p class="text-xs text-muted">
           <UIcon name="i-lucide-refresh-cw" class="size-3.5 animate-spin inline mr-1" />
           <template v-if="syncProgress.stage === 'resolving'">
             Resolving students on Canvas… ({{ syncProgress.current }}/{{ syncProgress.total }}{{ syncProgress.label ? ` — ${syncProgress.label}` : '' }})
@@ -258,8 +328,10 @@ const summary = computed(() => {
           </template>
           This runs as several small requests, so it's normal for this to take a while for a large roster.
         </p>
-        <p v-else-if="lastCanvasSyncSummary" class="text-xs text-muted mt-3">
-          Last Canvas sync: {{ lastCanvasSyncSummary.studentsResolved }} students resolved,
+      </UCard>
+      <UCard v-else-if="lastCanvasSyncSummary" variant="subtle" class="mb-6" :ui="{ body: '!py-3' }">
+        <p class="text-xs text-muted">
+          Last sync just now: {{ lastCanvasSyncSummary.studentsResolved }} students resolved,
           {{ lastCanvasSyncSummary.coursesSynced.length }} course{{ lastCanvasSyncSummary.coursesSynced.length === 1 ? '' : 's' }} synced
           <template v-if="lastCanvasSyncSummary.studentsUnresolved.length > 0">
             · {{ lastCanvasSyncSummary.studentsUnresolved.length }} email{{ lastCanvasSyncSummary.studentsUnresolved.length === 1 ? '' : 's' }} not found on Canvas ({{ lastCanvasSyncSummary.studentsUnresolved.join(', ') }})
@@ -363,7 +435,7 @@ const summary = computed(() => {
                   {{ c.courseName }}
                 </span>
                 <span class="flex items-center gap-2 shrink-0">
-                  <UBadge color="neutral" variant="subtle" size="sm">{{ c.outcomes.length }} outcomes</UBadge>
+                  <UBadge color="neutral" variant="subtle" size="sm">{{ groupOutcomes(c.outcomes).length }} outcome groups</UBadge>
                   <UIcon
                     :name="expandedCourseKey === `${s.studentId}::${c.courseId}` ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
                     class="size-3.5 text-muted"
@@ -371,53 +443,79 @@ const summary = computed(() => {
                 </span>
               </button>
 
-              <!-- Learning outcomes within this course -->
+              <!-- Learning outcome groups within this course -->
               <div v-if="expandedCourseKey === `${s.studentId}::${c.courseId}`" class="bg-elevated/20">
                 <div v-if="c.outcomes.length === 0" class="px-10 py-2 text-xs text-muted">
                   No learning outcomes synced for this course.
                 </div>
-                <div v-for="o in c.outcomes" :key="o.outcomeId" class="border-t border-default">
+                <div v-for="g in groupOutcomes(c.outcomes)" :key="g.groupName" class="border-t border-default">
                   <button
                     class="w-full flex items-center justify-between gap-3 px-10 py-2 text-left hover:bg-elevated/40 transition-colors"
-                    @click="toggleOutcome(s.studentId, c.courseId, o.outcomeId)"
+                    @click="toggleOutcomeGroup(s.studentId, c.courseId, g.groupName)"
                   >
-                    <span class="text-sm text-highlighted">{{ o.title }}</span>
+                    <span class="text-sm font-medium text-highlighted">{{ g.groupName }}</span>
                     <span class="flex items-center gap-2 shrink-0">
-                      <UBadge color="neutral" variant="subtle" size="sm">
-                        {{ o.assignments.filter(a => a.submitted).length }}/{{ o.assignments.length }} submitted
+                      <UBadge color="neutral" variant="subtle" size="sm">{{ g.outcomes.length }} outcomes</UBadge>
+                      <UBadge
+                        :color="g.totalAssignments > 0 && g.submittedAssignments === g.totalAssignments ? 'success' : 'neutral'"
+                        variant="subtle"
+                        size="sm"
+                      >
+                        {{ g.submittedAssignments }}/{{ g.totalAssignments }} submitted
                       </UBadge>
                       <UIcon
-                        :name="expandedOutcomeKey === `${s.studentId}::${c.courseId}::${o.outcomeId}` ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+                        :name="expandedOutcomeGroupKey === `${s.studentId}::${c.courseId}::${g.groupName}` ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
                         class="size-3.5 text-muted"
                       />
                     </span>
                   </button>
 
-                  <!-- Assignments aligned to this outcome -->
-                  <div
-                    v-if="expandedOutcomeKey === `${s.studentId}::${c.courseId}::${o.outcomeId}`"
-                    class="px-14 pb-2 space-y-1"
-                  >
-                    <div v-if="o.assignments.length === 0" class="text-xs text-muted py-1">
-                      No assignments aligned to this outcome in Canvas.
-                    </div>
-                    <div
-                      v-for="a in o.assignments"
-                      :key="a.assignmentId"
-                      class="flex items-center justify-between gap-3 py-1 text-xs"
-                    >
-                      <span class="flex items-center gap-1.5 text-muted">
-                        <UIcon
-                          :name="a.submitted ? 'i-lucide-check-circle-2' : 'i-lucide-circle'"
-                          class="size-3.5 shrink-0"
-                          :class="a.submitted ? 'text-success' : 'text-muted'"
-                        />
-                        {{ a.name }}
-                      </span>
-                      <span class="flex items-center gap-1.5 shrink-0 text-muted">
-                        <UBadge v-if="a.late" color="warning" variant="subtle" size="sm">late</UBadge>
-                        {{ a.submitted ? 'Submitted' : 'Not submitted' }}
-                      </span>
+                  <!-- Individual outcomes within this group -->
+                  <div v-if="expandedOutcomeGroupKey === `${s.studentId}::${c.courseId}::${g.groupName}`" class="bg-elevated/20">
+                    <div v-for="o in g.outcomes" :key="o.outcomeId" class="border-t border-default">
+                      <button
+                        class="w-full flex items-center justify-between gap-3 px-14 py-2 text-left hover:bg-elevated/40 transition-colors"
+                        @click="toggleOutcome(s.studentId, c.courseId, o.outcomeId)"
+                      >
+                        <span class="text-sm text-highlighted">{{ o.title }}</span>
+                        <span class="flex items-center gap-2 shrink-0">
+                          <UBadge color="neutral" variant="subtle" size="sm">
+                            {{ o.assignments.filter(a => a.submitted).length }}/{{ o.assignments.length }} submitted
+                          </UBadge>
+                          <UIcon
+                            :name="expandedOutcomeKey === `${s.studentId}::${c.courseId}::${o.outcomeId}` ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+                            class="size-3.5 text-muted"
+                          />
+                        </span>
+                      </button>
+
+                      <!-- Assignments aligned to this outcome -->
+                      <div
+                        v-if="expandedOutcomeKey === `${s.studentId}::${c.courseId}::${o.outcomeId}`"
+                        class="px-16 pb-2 space-y-1"
+                      >
+                        <div v-if="o.assignments.length === 0" class="text-xs text-muted py-1 pl-4">
+                          No assignments aligned to this outcome in Canvas.
+                        </div>
+                        <div
+                          v-for="a in o.assignments"
+                          :key="a.assignmentId"
+                          class="flex items-center justify-between gap-3 py-1 pl-4 text-xs"
+                        >
+                          <span class="flex items-center gap-1.5 text-muted">
+                            <UIcon
+                              :name="a.submitted ? 'i-lucide-check-circle-2' : 'i-lucide-circle'"
+                              class="size-3.5 shrink-0"
+                              :class="a.submitted ? 'text-success' : 'text-muted'"
+                            />
+                            {{ a.name }}
+                          </span>
+                          <span class="flex items-center gap-1.5 shrink-0 text-muted">
+                            <UBadge v-if="a.late" color="warning" variant="subtle" size="sm">late</UBadge>
+                            {{ a.submitted ? 'Submitted' : 'Not submitted' }}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
