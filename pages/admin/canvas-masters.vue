@@ -3,10 +3,12 @@
 //
 // A fixed roster of masters students, spanning every Canvas course each
 // one is enrolled in -- not just one selected course, unlike the
-// regular Canvas tab. Click a student to see their Program/Cohort,
-// meeting attendance (imported from an external Google Sheet), and a
-// nested Course -> Learning Outcome -> Assignment tree showing which
+// regular Canvas tab. Click a student to open their own dashboard
+// (pages/admin/canvas-masters/[email].vue) with Program/Cohort, meeting
+// attendance (imported from an external Google Sheet), and a nested
+// Course -> Learning Outcome -> Assignment tree showing which
 // assignments count toward each outcome and whether they've submitted.
+// This list itself only shows the summary row per student.
 //
 // "Sync From Canvas" talks to Canvas directly and account-wide: for
 // each roster email, it resolves the Canvas account and lists every
@@ -32,11 +34,6 @@ const attendanceSyncing = ref(false)
 const canvasSyncing = ref(false)
 const lastCanvasSyncSummary = ref<any>(null)
 const syncProgress = ref<{ stage: string; current: number; total: number; label: string } | null>(null)
-
-const expandedStudentId = ref<string | null>(null)
-const expandedCourseKey = ref<string | null>(null)
-const expandedOutcomeGroupKey = ref<string | null>(null)
-const expandedOutcomeKey = ref<string | null>(null)
 
 async function fetchRoster() {
   loading.value = true
@@ -177,61 +174,6 @@ async function syncAttendanceSheet() {
 }
 
 onMounted(fetchRoster)
-
-function toggleStudent(studentId: string) {
-  expandedStudentId.value = expandedStudentId.value === studentId ? null : studentId
-  expandedCourseKey.value = null
-  expandedOutcomeGroupKey.value = null
-  expandedOutcomeKey.value = null
-}
-
-function toggleCourse(studentId: string, courseId: number) {
-  const key = `${studentId}::${courseId}`
-  expandedCourseKey.value = expandedCourseKey.value === key ? null : key
-  expandedOutcomeGroupKey.value = null
-  expandedOutcomeKey.value = null
-}
-
-function toggleOutcomeGroup(studentId: string, courseId: number, groupName: string) {
-  const key = `${studentId}::${courseId}::${groupName}`
-  expandedOutcomeGroupKey.value = expandedOutcomeGroupKey.value === key ? null : key
-  expandedOutcomeKey.value = null
-}
-
-function toggleOutcome(studentId: string, courseId: number, outcomeId: number) {
-  const key = `${studentId}::${courseId}::${outcomeId}`
-  expandedOutcomeKey.value = expandedOutcomeKey.value === key ? null : key
-}
-
-// Canvas courses can define dozens of very granular outcomes (a real
-// example: 48 for one course). Shown as one flat list they're hard to
-// scan, so this groups them by group_name -- the same field the
-// Competency Matrix tab on the regular Canvas page already uses for its
-// section headers (e.g. "Machine Learning Modeling") -- so a course's
-// outcomes read as a handful of named categories you can drill into,
-// not 48 undifferentiated rows.
-function groupOutcomes(outcomes: any[]) {
-  const groups = new Map<string, any[]>()
-  for (const o of outcomes) {
-    const key = o.groupName || 'Ungrouped'
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(o)
-  }
-  return [...groups.entries()].map(([groupName, groupOutcomesList]) => {
-    const totalAssignments = groupOutcomesList.reduce((sum, o) => sum + o.assignments.length, 0)
-    const submittedAssignments = groupOutcomesList.reduce(
-      (sum, o) => sum + o.assignments.filter((a: any) => a.submitted).length,
-      0
-    )
-    return { groupName, outcomes: groupOutcomesList, totalAssignments, submittedAssignments }
-  })
-}
-
-function formatMinutes(mins: number) {
-  const h = Math.floor(mins / 60)
-  const m = Math.round(mins % 60)
-  return h > 0 ? `${h}h ${m}m` : `${m}m`
-}
 
 function formatSyncDate(iso: string) {
   const date = new Date(iso)
@@ -375,154 +317,27 @@ const summary = computed(() => {
       </div>
 
       <div v-else class="rounded-lg border border-default divide-y divide-default">
-        <div v-for="s in filteredStudents" :key="s.studentId">
-          <!-- Student row -->
-          <button
-            class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-elevated/40 transition-colors"
-            @click="toggleStudent(s.studentId)"
-          >
-            <div class="size-8 rounded-full bg-elevated flex items-center justify-center shrink-0">
-              <UIcon name="i-lucide-user" class="size-4 text-muted" />
-            </div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-highlighted truncate">{{ s.name || s.email }}</p>
-              <p class="text-xs text-muted truncate">{{ s.email }}</p>
-            </div>
-            <UBadge color="neutral" variant="subtle" size="sm">{{ s.program }} · {{ s.cohortLabel }}</UBadge>
-            <UBadge v-if="!s.canvasSynced" color="warning" variant="subtle" size="sm">Not synced yet</UBadge>
-            <div class="hidden sm:flex items-center gap-1.5 text-xs text-muted w-32 shrink-0">
-              <UIcon name="i-lucide-video" class="size-3.5" />
-              {{ s.attendance.meetingsAttended }} meetings ({{ s.attendance.percent }}%)
-            </div>
-            <UIcon
-              :name="expandedStudentId === s.studentId ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-              class="size-4 text-muted shrink-0"
-            />
-          </button>
-
-          <!-- Expanded: attendance detail + courses -->
-          <div v-if="expandedStudentId === s.studentId" class="bg-elevated/20">
-            <!-- Attendance detail -->
-            <div class="px-6 py-3 border-b border-default flex items-center gap-4 flex-wrap text-xs text-muted">
-              <span class="flex items-center gap-1.5">
-                <UIcon name="i-lucide-video" class="size-3.5" />
-                {{ s.attendance.meetingsAttended }} / {{ s.attendance.maxMeetingsInCohort }} meetings (top attendee in cohort)
-              </span>
-              <span class="flex items-center gap-1.5">
-                <UIcon name="i-lucide-clock" class="size-3.5" />
-                {{ formatMinutes(s.attendance.totalDurationMinutes) }} total
-              </span>
-              <UBadge color="neutral" variant="subtle" size="sm">{{ s.attendance.percent }}% of top attendee</UBadge>
-            </div>
-
-            <div v-if="!s.canvasSynced" class="px-6 py-3 text-xs text-muted">
-              Not resolved on Canvas yet — click "Sync From Canvas" above. If it still doesn't
-              resolve after that, this email may not match a Canvas account (typo, or the
-              student hasn't logged into Canvas yet).
-            </div>
-            <div v-else-if="s.courses.length === 0" class="px-6 py-3 text-xs text-muted">
-              Resolved on Canvas, but not currently enrolled in any course as a student.
-            </div>
-
-            <!-- Courses -->
-            <div v-for="c in s.courses" :key="c.courseId" class="border-b border-default last:border-b-0">
-              <button
-                class="w-full flex items-center justify-between gap-3 px-6 py-2.5 text-left hover:bg-elevated/40 transition-colors"
-                @click="toggleCourse(s.studentId, c.courseId)"
-              >
-                <span class="flex items-center gap-2 text-sm text-highlighted">
-                  <UIcon name="i-lucide-graduation-cap" class="size-3.5 text-muted" />
-                  {{ c.courseName }}
-                </span>
-                <span class="flex items-center gap-2 shrink-0">
-                  <UBadge color="neutral" variant="subtle" size="sm">{{ groupOutcomes(c.outcomes).length }} outcome groups</UBadge>
-                  <UIcon
-                    :name="expandedCourseKey === `${s.studentId}::${c.courseId}` ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-                    class="size-3.5 text-muted"
-                  />
-                </span>
-              </button>
-
-              <!-- Learning outcome groups within this course -->
-              <div v-if="expandedCourseKey === `${s.studentId}::${c.courseId}`" class="bg-elevated/20">
-                <div v-if="c.outcomes.length === 0" class="px-10 py-2 text-xs text-muted">
-                  No learning outcomes synced for this course.
-                </div>
-                <div v-for="g in groupOutcomes(c.outcomes)" :key="g.groupName" class="border-t border-default">
-                  <button
-                    class="w-full flex items-center justify-between gap-3 px-10 py-2 text-left hover:bg-elevated/40 transition-colors"
-                    @click="toggleOutcomeGroup(s.studentId, c.courseId, g.groupName)"
-                  >
-                    <span class="text-sm font-medium text-highlighted">{{ g.groupName }}</span>
-                    <span class="flex items-center gap-2 shrink-0">
-                      <UBadge color="neutral" variant="subtle" size="sm">{{ g.outcomes.length }} outcomes</UBadge>
-                      <UBadge
-                        :color="g.totalAssignments > 0 && g.submittedAssignments === g.totalAssignments ? 'success' : 'neutral'"
-                        variant="subtle"
-                        size="sm"
-                      >
-                        {{ g.submittedAssignments }}/{{ g.totalAssignments }} submitted
-                      </UBadge>
-                      <UIcon
-                        :name="expandedOutcomeGroupKey === `${s.studentId}::${c.courseId}::${g.groupName}` ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-                        class="size-3.5 text-muted"
-                      />
-                    </span>
-                  </button>
-
-                  <!-- Individual outcomes within this group -->
-                  <div v-if="expandedOutcomeGroupKey === `${s.studentId}::${c.courseId}::${g.groupName}`" class="bg-elevated/20">
-                    <div v-for="o in g.outcomes" :key="o.outcomeId" class="border-t border-default">
-                      <button
-                        class="w-full flex items-center justify-between gap-3 px-14 py-2 text-left hover:bg-elevated/40 transition-colors"
-                        @click="toggleOutcome(s.studentId, c.courseId, o.outcomeId)"
-                      >
-                        <span class="text-sm text-highlighted">{{ o.title }}</span>
-                        <span class="flex items-center gap-2 shrink-0">
-                          <UBadge color="neutral" variant="subtle" size="sm">
-                            {{ o.assignments.filter(a => a.submitted).length }}/{{ o.assignments.length }} submitted
-                          </UBadge>
-                          <UIcon
-                            :name="expandedOutcomeKey === `${s.studentId}::${c.courseId}::${o.outcomeId}` ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-                            class="size-3.5 text-muted"
-                          />
-                        </span>
-                      </button>
-
-                      <!-- Assignments aligned to this outcome -->
-                      <div
-                        v-if="expandedOutcomeKey === `${s.studentId}::${c.courseId}::${o.outcomeId}`"
-                        class="px-16 pb-2 space-y-1"
-                      >
-                        <div v-if="o.assignments.length === 0" class="text-xs text-muted py-1 pl-4">
-                          No assignments aligned to this outcome in Canvas.
-                        </div>
-                        <div
-                          v-for="a in o.assignments"
-                          :key="a.assignmentId"
-                          class="flex items-center justify-between gap-3 py-1 pl-4 text-xs"
-                        >
-                          <span class="flex items-center gap-1.5 text-muted">
-                            <UIcon
-                              :name="a.submitted ? 'i-lucide-check-circle-2' : 'i-lucide-circle'"
-                              class="size-3.5 shrink-0"
-                              :class="a.submitted ? 'text-success' : 'text-muted'"
-                            />
-                            {{ a.name }}
-                          </span>
-                          <span class="flex items-center gap-1.5 shrink-0 text-muted">
-                            <UBadge v-if="a.late" color="warning" variant="subtle" size="sm">late</UBadge>
-                            {{ a.submitted ? 'Submitted' : 'Not submitted' }}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+        <NuxtLink
+          v-for="s in filteredStudents"
+          :key="s.studentId"
+          :to="`/admin/canvas-masters/${encodeURIComponent(s.email)}`"
+          class="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-elevated/40 transition-colors"
+        >
+          <div class="size-8 rounded-full bg-elevated flex items-center justify-center shrink-0">
+            <UIcon name="i-lucide-user" class="size-4 text-muted" />
           </div>
-        </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-highlighted truncate">{{ s.name || s.email }}</p>
+            <p class="text-xs text-muted truncate">{{ s.email }}</p>
+          </div>
+          <UBadge color="neutral" variant="subtle" size="sm">{{ s.program }} · {{ s.cohortLabel }}</UBadge>
+          <UBadge v-if="!s.canvasSynced" color="warning" variant="subtle" size="sm">Not synced yet</UBadge>
+          <div class="hidden sm:flex items-center gap-1.5 text-xs text-muted w-32 shrink-0">
+            <UIcon name="i-lucide-video" class="size-3.5" />
+            {{ s.attendance.meetingsAttended }} meetings ({{ s.attendance.percent }}%)
+          </div>
+          <UIcon name="i-lucide-chevron-right" class="size-4 text-muted shrink-0" />
+        </NuxtLink>
       </div>
     </template>
   </UDashboardPanel>
