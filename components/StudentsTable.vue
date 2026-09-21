@@ -288,6 +288,11 @@ const columns = [
   {
     accessorKey: "accountStatus",
     header: "Account Status",
+    // Explicit exact-match filter: the default TanStack "includesString"
+    // filterFn does a case-insensitive substring match, which makes
+    // filtering by "Active" also match "Inactive" (since "Active" is a
+    // substring of "Inactive"). "equalsString" fixes that.
+    filterFn: "equalsString",
     cell: ({ row }) => {
       const accountStatus = row.getValue("accountStatus");
       const color = {
