@@ -111,7 +111,8 @@ export function useStudents() {
         qwasarId: values[1] || null,
         email: values[2] || '',
         programme: values[3] || '',
-        cohort: values[4] || ''
+        cohort: values[4] || '',
+        studentClass: values[5] || ''
       })
     }
 

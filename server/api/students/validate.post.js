@@ -17,6 +17,11 @@ const programNameMap = {
   'Software Engineering': 'Software Engineering'
 }
 
+// Kept in sync with the same list in import.post.js -- validate must
+// resolve studentClass the exact same way import does, or the preview
+// can show something different from what actually gets saved.
+const VALID_CLASSES = ['Regular', 'Code Academy']
+
 export default defineEventHandler(async (event) => {
   const client = await serverSupabaseClient(event)
   const user = await serverSupabaseUser(event)
@@ -102,6 +107,7 @@ export default defineEventHandler(async (event) => {
       username: s.qwasarId || null,
       programme: programName,
       cohort: s.cohort,
+      studentClass: VALID_CLASSES.includes(s.studentClass) ? s.studentClass : 'Regular',
       program_id: programId,
       cohort_id: cohortId
     })
