@@ -52,23 +52,25 @@
   });
 
   async function refreshGoogleToken() {
-    // Only run on client-side where localStorage is available
+    // Only run on client-side
     if (import.meta.server) return null;
 
-    const storedRefreshToken = window.localStorage.getItem("oauth_provider_refresh_token");
-    if (!storedRefreshToken) return null;
-
-    // Exchanged server-side now -- see server/api/auth/refresh-google-token.post.js.
-    // Previously this posted directly to Google's token endpoint from
-    // the browser, which required including the OAuth client secret in
-    // a client-side request (and thus in the public JS bundle).
-    const dataGoogle = await $fetch("/api/auth/refresh-google-token", {
-      method: "POST",
-      body: { refreshToken: storedRefreshToken },
-    });
-
-    googleAccessToken.value = dataGoogle.access_token;
-    return dataGoogle.access_token;
+    // The refresh token lives in an httpOnly cookie now (set at login by
+    // /api/auth/store-google-refresh-token) -- this client code never
+    // sees it, just asks the server to use it. See
+    // server/api/auth/refresh-google-token.post.js for the full
+    // rationale (both the client-secret fix and this localStorage fix).
+    try {
+      const dataGoogle = await $fetch("/api/auth/refresh-google-token", {
+        method: "POST",
+      });
+      googleAccessToken.value = dataGoogle.access_token;
+      return dataGoogle.access_token;
+    } catch (error) {
+      // 401 here just means no Google connection on file yet (or it's
+      // been revoked) -- not an error worth surfacing loudly.
+      return null;
+    }
   }
 
   // Watch the token, refresh if undefined - only on client side

@@ -1,10 +1,10 @@
-import { createError, readBody } from 'h3'
+import { createError, getCookie } from 'h3'
 
 // POST /api/auth/refresh-google-token
 //
-// Exchanges a stored Google OAuth refresh token for a fresh access
-// token, server-side. This replaces two identical client-side calls
-// that used to live in pages/students/dashboard.vue and
+// Exchanges the stored Google OAuth refresh token for a fresh access
+// token, entirely server-side. This replaces two identical client-side
+// calls that used to live in pages/students/dashboard.vue and
 // pages/students/calendar.vue, which POSTed directly to
 // https://www.googleapis.com/oauth2/v3/token from the browser --
 // including the Google OAuth **client secret** in that request body.
@@ -13,23 +13,21 @@ import { createError, readBody } from 'h3'
 // anything under `public` gets bundled into the client-side JS Nuxt
 // ships to every visitor. So the client secret was effectively baked
 // into the production JS bundle, readable by anyone who opened
-// devtools on the live site -- regardless of whether Google's own
-// client-vs-server OAuth model even calls for it to be secret (it
-// does: this is a "confidential client" flow, since a server-side
-// client secret exists for this app at all; a purely public client
-// wouldn't have one).
+// devtools on the live site.
 //
-// The fix: only the refresh token itself travels from the browser to
-// this endpoint. The client ID and secret are read from the
-// server-only half of runtimeConfig (googleClientId / googleClientSecret
-// in nuxt.config.ts, NOT the `public` block), so they never reach the
-// client bundle. Only the resulting access token is sent back.
+// The fix: the client ID and secret are read from the server-only half
+// of runtimeConfig (googleClientId / googleClientSecret in
+// nuxt.config.ts, NOT the `public` block), so they never reach the
+// client bundle. The refresh token itself is read from the httpOnly
+// google_refresh_token cookie (set by store-google-refresh-token.post.js)
+// rather than being passed in the request body -- client-side JS never
+// sees or handles the refresh token at any point in this flow. Only the
+// resulting short-lived access token is sent back to the browser.
 export default defineEventHandler(async (event) => {
-  const body = await readBody(event)
-  const refreshToken = body?.refreshToken
+  const refreshToken = getCookie(event, 'google_refresh_token')
 
   if (!refreshToken) {
-    throw createError({ statusCode: 400, statusMessage: 'refreshToken is required' })
+    throw createError({ statusCode: 401, statusMessage: 'No Google refresh token on file -- user needs to reconnect Google Calendar' })
   }
 
   const config = useRuntimeConfig()

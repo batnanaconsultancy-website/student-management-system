@@ -16,18 +16,19 @@ const route = useRoute();
 const isErrorVisible = ref(false);
 
 supabase.auth.onAuthStateChange((event, session) => {
-  if (session && session.provider_token) {
-    window.localStorage.setItem("oauth_provider_token", session.provider_token);
-  }
+  // The refresh token is handed to the server to store as an httpOnly
+  // cookie (see server/api/auth/store-google-refresh-token.post.js)
+  // instead of localStorage -- localStorage is readable by any script
+  // running on the page, which made this long-lived token a target for
+  // XSS-based theft. An httpOnly cookie is invisible to JS entirely.
   if (session && session.provider_refresh_token) {
-    window.localStorage.setItem(
-      "oauth_provider_refresh_token",
-      session.provider_refresh_token,
-    );
+    $fetch("/api/auth/store-google-refresh-token", {
+      method: "POST",
+      body: { refreshToken: session.provider_refresh_token },
+    }).catch((err) => console.error("Failed to store Google refresh token", err));
   }
   if (event === "SIGNED_OUT") {
-    window.localStorage.removeItem("oauth_provider_token");
-    window.localStorage.removeItem("oauth_provider_refresh_token");
+    $fetch("/api/auth/clear-google-tokens", { method: "POST" }).catch(() => {});
   }
 
   // After authentication success, redirect to dashboard

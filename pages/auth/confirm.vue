@@ -8,18 +8,16 @@ const user = useSupabaseUser();
 const cookieName = useRuntimeConfig().public.supabase.cookieName;
 
 supabase.auth.onAuthStateChange((event, session) => {
-  if (session && session.provider_token) {
-    window.localStorage.setItem("oauth_provider_token", session.provider_token);
-  }
+  // See pages/index.vue for why this goes to the server instead of
+  // localStorage -- httpOnly cookie, invisible to any client-side JS.
   if (session && session.provider_refresh_token) {
-    window.localStorage.setItem(
-      "oauth_provider_refresh_token",
-      session.provider_refresh_token,
-    );
+    $fetch("/api/auth/store-google-refresh-token", {
+      method: "POST",
+      body: { refreshToken: session.provider_refresh_token },
+    }).catch((err) => console.error("Failed to store Google refresh token", err));
   }
   if (event === "SIGNED_OUT") {
-    window.localStorage.removeItem("oauth_provider_token");
-    window.localStorage.removeItem("oauth_provider_refresh_token");
+    $fetch("/api/auth/clear-google-tokens", { method: "POST" }).catch(() => {});
   }
 });
 
