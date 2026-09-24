@@ -8,7 +8,6 @@ definePageMeta({
 
 const supabase = useSupabaseClient();
 const nuxtApp = useNuxtApp();
-const runtimeConfig = useRuntimeConfig();
 
 // Google Calendar integration
 const googleAccessToken = ref(null);
@@ -166,25 +165,17 @@ async function refreshGoogleToken() {
         return null;
     }
 
+    // Exchanged server-side now -- see server/api/auth/refresh-google-token.post.js.
+    // Previously this posted directly to Google's token endpoint from
+    // the browser, which required including the OAuth client secret in
+    // a client-side request (and thus in the public JS bundle).
     try {
-        const response = await fetch("https://www.googleapis.com/oauth2/v3/token", {
+        const dataGoogle = await $fetch("/api/auth/refresh-google-token", {
             method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-                client_id: runtimeConfig.public.googleClientId,
-                client_secret: runtimeConfig.public.googleClientSecret,
-                refresh_token: storedRefreshToken,
-                grant_type: "refresh_token",
-            }),
+            body: { refreshToken: storedRefreshToken },
         });
 
-        if (!response.ok) {
-            throw new Error("Failed to refresh token");
-        }
-
-        const dataGoogle = await response.json();
         googleAccessToken.value = dataGoogle.access_token;
-        console.log("New access token: ", googleAccessToken.value);
         return dataGoogle.access_token;
     } catch (error) {
         console.error("Error refreshing token:", error);

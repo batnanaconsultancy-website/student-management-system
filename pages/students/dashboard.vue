@@ -8,7 +8,6 @@
 
   const supabase = useSupabaseClient();
   const nuxtApp = useNuxtApp();
-  const runtimeConfig = useRuntimeConfig();
   const tipsRead = ref(0);
   const googleAccessToken = ref(null);
 
@@ -59,18 +58,15 @@
     const storedRefreshToken = window.localStorage.getItem("oauth_provider_refresh_token");
     if (!storedRefreshToken) return null;
 
-    const response = await fetch("https://www.googleapis.com/oauth2/v3/token", {
+    // Exchanged server-side now -- see server/api/auth/refresh-google-token.post.js.
+    // Previously this posted directly to Google's token endpoint from
+    // the browser, which required including the OAuth client secret in
+    // a client-side request (and thus in the public JS bundle).
+    const dataGoogle = await $fetch("/api/auth/refresh-google-token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: runtimeConfig.public.googleClientId,
-        client_secret: runtimeConfig.public.googleClientSecret,
-        refresh_token: storedRefreshToken,
-        grant_type: "refresh_token",
-      }),
+      body: { refreshToken: storedRefreshToken },
     });
 
-    const dataGoogle = await response.json();
     googleAccessToken.value = dataGoogle.access_token;
     return dataGoogle.access_token;
   }
