@@ -1,5 +1,6 @@
 import { createError } from 'h3'
-import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+
+import { serverSupabaseClient, serverSupabaseUser, serverSupabaseServiceRole } from '#supabase/server'
 
 // POST /api/admin/canvas-masters/mark-canvas-synced
 // Body: { studentsResolved, studentsUnresolved, coursesSynced }
@@ -34,7 +35,9 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event)
 
-  const { error: upsertError } = await supabase
+  const serviceClient = serverSupabaseServiceRole(event)
+
+  const { error: upsertError } = await serviceClient
     .from('canvas_masters_sync_status')
     .upsert(
       {
