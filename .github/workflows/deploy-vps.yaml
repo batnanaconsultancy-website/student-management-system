@@ -22,7 +22,6 @@ jobs:
           host: 31.97.34.52
           username: root
           key: ${{ secrets.VPS_DEPLOY_KEY }}
-          fingerprint: SHA256:7tuWjMPsGCyJsxZ6j/dxfNIsnGHZ3l5rLFe3xabvY8g
           script: |
             set -e
 
