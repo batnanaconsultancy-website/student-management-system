@@ -123,11 +123,17 @@ const table = useTemplateRef("table");
 const columnFilters = ref([
   { id: "name", value: "" },
   { id: "status", value: "" },
+  // Defaults the Account Status filter to "Active" on load (see
+  // accountStatusFilter below) -- setColumnFilter's watcher only fires on
+  // subsequent changes, not the initial ref value, so the column filter
+  // itself needs this seeded here too or the table would still show every
+  // status despite the dropdown displaying "Active".
+  { id: "accountStatus", value: "Active" },
 ]);
 
 const pagination = ref({
   pageIndex: 0,
-  pageSize: 7,
+  pageSize: 10,
 });
 
 const sorting = ref([
@@ -141,7 +147,9 @@ const statusFilter = ref("all");
 const programFilter = ref("all");
 const cohortFilter = ref("all");
 const classFilter = ref("all");
-const accountStatusFilter = ref("all");
+// Defaults to "Active" so the dashboard opens already filtered to active
+// students, matching the columnFilters seed above.
+const accountStatusFilter = ref("Active");
 const cohortItems = ref([]);
 const open = ref(false)
 const openModal = ref(false)
