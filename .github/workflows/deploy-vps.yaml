@@ -1,48 +1,49 @@
 name: Deploy SIS to VPS
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+push:
+branches:
+- main
+workflow_dispatch:
 
 concurrency:
-  group: sis-production-deploy
-  cancel-in-progress: true
+group: sis-production-deploy
+cancel-in-progress: true
 
 jobs:
-  deploy:
-    name: Deploy to Hostinger VPS
-    runs-on: ubuntu-latest
+deploy:
+name: Deploy to Hostinger VPS
+runs-on: ubuntu-latest
 
-    steps:
-      - name: Deploy over SSH with retry
-        uses: Wandalen/wretry.action@v3.8.0
-        with:
-          action: appleboy/ssh-action@v1.2.2
-          attempt_limit: 3
-          attempt_delay: 20000
-          with: |
-            host: 31.97.34.52
-            username: root
-            key: ${{ secrets.VPS_DEPLOY_KEY }}
-            script: |
-              set -e
+steps:
+  - name: Deploy over SSH with retry
+    uses: Wandalen/wretry.action@v3.8.0
+    with:
+      action: appleboy/ssh-action@v1.2.2
+      attempt_limit: 3
+      attempt_delay: 20000
+      with: |
+        host: 31.97.34.52
+        username: root
+        key: ${{ secrets.VPS_DEPLOY_KEY }}
+        script: |
+          set -e
 
-              cd /root/student-management-system
+          cd /root/student-management-system
 
-              echo "== Pulling latest code =="
-              git fetch origin main
-              git reset --hard origin/main
+          echo "== Pulling latest code =="
+          git fetch origin main
+          git reset --hard origin/main
 
-              echo "== Installing dependencies =="
-              npm install
+          echo "== Installing dependencies =="
+          npm install
 
-              echo "== Building Nuxt application =="
-              npm run build
+          echo "== Building Nuxt application =="
+          npm run build
 
-              echo "== Restarting application =="
-              pm2 restart student-management-system --update-env
+          echo "== Restarting application =="
+          pm2 restart student-management-system --update-env
 
-              echo "== Deployment complete =="
-              pm2 status student-management-system
+          echo "== Deployment complete =="
+          pm2 status student-management-system
+
