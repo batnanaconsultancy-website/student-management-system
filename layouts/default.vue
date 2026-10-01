@@ -52,6 +52,15 @@ const mainLinks: NavigationMenuItem[] = [
       text: "Canvas Masters",
     },
   },
+  {
+    label: "Final Project Assessment",
+    to: "/admin/final-project-assessment",
+    ariaLabel: "Final Project Assessment",
+    icon: "i-lucide-clipboard-check",
+    tooltip: {
+      text: "Final Project Assessment",
+    },
+  },
 
   {
     label: "Analytics",
