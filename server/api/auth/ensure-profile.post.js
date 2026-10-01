@@ -17,17 +17,25 @@ export default defineEventHandler(async (event) => {
 
     console.log("Checking role for user:", user.email);
 
-    // Check if user email exists in admin table (simplified - just check existence)
-    const { data: adminRecord, error: adminError } = await client
-      .from("admin")
-      .select("email")
-      .eq("email", user.email)
-      .single();
+    // Admin and examiner are checked independently -- someone can be
+    // both at once (see useAuth.ts / the Final Project Assessment
+    // migration for the full explanation).
+    const [adminResult, examinerResult] = await Promise.all([
+      client.from("admin").select("email").eq("email", user.email).maybeSingle(),
+      client.from("examiners").select("id").eq("email", (user.email || "").toLowerCase()).eq("is_active", true).maybeSingle(),
+    ]);
 
-    // Determine role: if email exists in admin table, they're admin; otherwise student/user
-    const role = adminRecord && !adminError ? "admin" : "user";
+    const isAdminUser = Boolean(adminResult.data && !adminResult.error);
+    const isExaminerUser = Boolean(examinerResult.data && !examinerResult.error);
 
-    console.log("Role determined:", role);
+    // Primary role for redirect purposes. A pure examiner (not an
+    // admin) gets their own role so they land on the examiner area
+    // instead of the student dashboard, which assumes a student record.
+    let role = "user";
+    if (isAdminUser) role = "admin";
+    else if (isExaminerUser) role = "examiner";
+
+    console.log("Role determined:", role, "isExaminer:", isExaminerUser);
 
     // Fire-and-forget: make sure this person's Google account has access
     // to the shared meetings calendar. Cheap/idempotent (a no-op if they
@@ -40,6 +48,9 @@ export default defineEventHandler(async (event) => {
     return {
       success: true,
       role: role,
+      // Independent of `role` -- true even when role === 'admin', for
+      // an admin who is also an examiner.
+      isExaminer: isExaminerUser,
     };
   } catch (err) {
     console.error("Role check error:", err);
