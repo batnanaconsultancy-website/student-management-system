@@ -17,32 +17,75 @@ jobs:
 
     steps:
       - name: Deploy over SSH with retry
-        uses: Wandalen/wretry.action@v3.8.0
-        with:
-          action: appleboy/ssh-action@v1.2.2
-          attempt_limit: 3
-          attempt_delay: 20000
-          with: |
-            host: 31.97.34.52
-            username: root
-            key: ${{ secrets.VPS_DEPLOY_KEY }}
-            script: |
-              set -e
+        env:
+          VPS_DEPLOY_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
+        run: |
+          set -e
 
-              cd /root/student-management-system
+          KEY_FILE="$RUNNER_TEMP/vps_deploy_key"
 
-              echo "== Pulling latest code =="
-              git fetch origin main
-              git reset --hard origin/main
+          printf '%s\n' "$VPS_DEPLOY_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
 
-              echo "== Installing dependencies =="
-              npm install
+          cleanup() {
+            rm -f "$KEY_FILE"
+          }
 
-              echo "== Building Nuxt application =="
-              npm run build
+          trap cleanup EXIT
 
-              echo "== Restarting application =="
-              pm2 restart student-management-system --update-env
+          echo "== Testing SSH connection and deploying =="
 
-              echo "== Deployment complete =="
-              pm2 status student-management-system
+          for attempt in 1 2 3; do
+            echo ""
+            echo "=========================================="
+            echo "Deployment attempt $attempt of 3"
+            echo "=========================================="
+
+            if ssh \
+              -i "$KEY_FILE" \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
+              -o ServerAliveInterval=15 \
+              -o ServerAliveCountMax=3 \
+              root@31.97.34.52 << 'REMOTE_SCRIPT'
+          set -e
+
+          cd /root/student-management-system
+
+          echo "== Pulling latest code =="
+          git fetch origin main
+          git reset --hard origin/main
+
+          echo "== Installing dependencies =="
+          npm install
+
+          echo "== Building Nuxt application =="
+          npm run build
+
+          echo "== Restarting application =="
+          pm2 restart student-management-system --update-env
+
+          echo "== Deployment complete =="
+          pm2 status student-management-system
+          REMOTE_SCRIPT
+            then
+              echo ""
+              echo "=========================================="
+              echo "Deployment succeeded on attempt $attempt"
+              echo "=========================================="
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              echo ""
+              echo "Deployment attempt $attempt failed."
+              echo "Waiting 20 seconds before retrying..."
+              sleep 20
+            fi
+          done
+
+          echo ""
+          echo "=========================================="
+          echo "Deployment failed after 3 attempts."
+          echo "=========================================="
+          exit 1
