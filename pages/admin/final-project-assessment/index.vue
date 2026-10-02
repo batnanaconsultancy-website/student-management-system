@@ -102,7 +102,12 @@ function submissionBadgeColor(status: string | undefined) {
       </div>
 
       <div v-else class="rounded-lg border border-default divide-y divide-default">
-        <div v-for="a in assignments" :key="a.id" class="p-4">
+        <div
+          v-for="a in assignments"
+          :key="a.id"
+          class="p-4 cursor-pointer hover:bg-elevated/30 transition-colors"
+          @click="navigateTo(`/admin/final-project-assessment/${a.id}`)"
+        >
           <div class="flex items-start justify-between gap-4 flex-wrap">
             <div class="min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
@@ -121,7 +126,13 @@ function submissionBadgeColor(status: string | undefined) {
             </div>
 
             <div class="flex items-center gap-2 shrink-0">
-              <UButton icon="i-lucide-archive" size="xs" color="neutral" variant="outline" @click="handleArchive(a)">
+              <UButton
+                icon="i-lucide-archive"
+                size="xs"
+                color="neutral"
+                variant="outline"
+                @click.stop="handleArchive(a)"
+              >
                 Archive
               </UButton>
             </div>

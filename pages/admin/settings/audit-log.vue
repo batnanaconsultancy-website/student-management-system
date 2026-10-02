@@ -27,7 +27,13 @@ const actionLabels: Record<string, string> = {
   create_cohort: 'Create cohort',
   update_cohort_status: 'Update cohort status',
   schedule_season: 'Schedule season',
-  pipeline_failed: 'Pipeline failure'
+  pipeline_failed: 'Pipeline failure',
+  examiner_added: 'Examiner added',
+  final_project_assignment_saved: 'Final project assignment saved',
+  final_project_assignment_archived: 'Final project assignment archived',
+  final_project_assignment_unarchived: 'Final project assignment unarchived',
+  final_project_assessment_submitted: 'Final project assessment submitted',
+  final_project_submission_reopened: 'Final project assessment reopened'
 }
 
 const actionColor: Record<string, string> = {
@@ -37,7 +43,12 @@ const actionColor: Record<string, string> = {
   add_admin: 'success',
   remove_admin: 'error',
   create_cohort: 'info',
-  pipeline_failed: 'error'
+  pipeline_failed: 'error',
+  examiner_added: 'info',
+  final_project_assignment_saved: 'info',
+  final_project_assignment_archived: 'neutral',
+  final_project_assessment_submitted: 'success',
+  final_project_submission_reopened: 'warning'
 }
 
 // Note: value must NOT be empty string in Nuxt UI v3 USelect

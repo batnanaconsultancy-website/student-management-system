@@ -71,6 +71,15 @@
       },
     },
     {
+      label: "Final Project Assessment",
+      to: "/students/final-project-assessment",
+      ariaLabel: "Final Project Assessment",
+      icon: "i-lucide-clipboard-check",
+      tooltip: {
+        text: "Final Project Assessment",
+      },
+    },
+    {
       label: "Guidance & Request",
       to: "/students/guidance",
       ariaLabel: "Guidance & Request",

@@ -31,6 +31,7 @@ function iconFor(type: string) {
     case 'status_change': return 'i-lucide-trending-down'
     case 'student_issue': return 'i-lucide-flag'
     case 'pipeline_failure': return 'i-lucide-triangle-alert'
+    case 'final_project_assessment_submitted': return 'i-lucide-clipboard-check'
     default: return 'i-lucide-bell'
   }
 }
@@ -40,8 +41,29 @@ function colorFor(type: string) {
     case 'status_change': return 'warning'
     case 'student_issue': return 'error'
     case 'pipeline_failure': return 'error'
+    case 'final_project_assessment_submitted': return 'success'
     default: return 'neutral'
   }
+}
+
+// "View Assessment" (spec Section 8): routes based on entity_type,
+// using the generic entity_type/entity_id columns that already existed
+// on admin_notifications but weren't wired to navigate anywhere before
+// this. Add more entity_type cases here as other notification-producing
+// features want the same click-through behavior.
+function linkFor(n: any): string | null {
+  if (n.entity_type === 'final_project_assignment' && n.entity_id) {
+    return `/admin/final-project-assessment/${n.entity_id}`
+  }
+  return null
+}
+
+async function handleNotificationClick(n: any) {
+  const link = linkFor(n)
+  if (!link) return
+  if (!n.is_read) await markAsRead([n.id])
+  open.value = false
+  await navigateTo(link)
 }
 
 function timeAgo(dateStr: string) {
@@ -94,13 +116,15 @@ function timeAgo(dateStr: string) {
             v-for="n in notifications"
             :key="n.id"
             class="flex gap-2.5 px-3 py-2.5 border-b border-default last:border-b-0"
-            :class="!n.is_read ? 'bg-primary/5' : ''"
+            :class="[!n.is_read ? 'bg-primary/5' : '', linkFor(n) ? 'cursor-pointer hover:bg-elevated/40' : '']"
+            @click="handleNotificationClick(n)"
           >
             <UIcon :name="iconFor(n.type)" :class="`text-${colorFor(n.type)} mt-0.5`" class="size-4 shrink-0" />
             <div class="min-w-0 flex-1">
               <p class="text-sm text-highlighted truncate">{{ n.title }}</p>
-              <p v-if="n.body" class="text-xs text-muted line-clamp-2 mt-0.5">{{ n.body }}</p>
+              <p v-if="n.body" class="text-xs text-muted line-clamp-2 mt-0.5 whitespace-pre-line">{{ n.body }}</p>
               <p class="text-xs text-dimmed mt-1">{{ timeAgo(n.created_at) }}</p>
+              <p v-if="linkFor(n)" class="text-xs text-primary mt-1">View Assessment →</p>
             </div>
             <span v-if="!n.is_read" class="size-1.5 rounded-full bg-primary shrink-0 mt-1.5" />
           </div>

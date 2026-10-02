@@ -93,12 +93,22 @@ function formatDate(iso: string | null) {
               </p>
               <p class="text-xs text-muted">{{ a.student?.email }} · {{ a.student?.program }} · {{ a.student?.cohort }}</p>
             </div>
-            <UBadge
-              :color="a.overallStatus === 'FINAL PROJECT ASSESSMENT COMPLETED' ? 'success' : 'neutral'"
-              variant="subtle"
-            >
-              {{ a.overallStatus }}
-            </UBadge>
+            <div class="flex items-center gap-2">
+              <UBadge
+                :color="a.overallStatus === 'FINAL PROJECT ASSESSMENT COMPLETED' ? 'success' : 'neutral'"
+                variant="subtle"
+              >
+                {{ a.overallStatus }}
+              </UBadge>
+              <UButton
+                size="xs"
+                color="neutral"
+                variant="outline"
+                :to="`/admin/final-project-assessment/${a.id}`"
+              >
+                View
+              </UButton>
+            </div>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
