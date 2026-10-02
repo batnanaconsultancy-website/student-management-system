@@ -28,6 +28,15 @@ const mainLinks: NavigationMenuItem[] = [
     },
   },
   {
+    label: "Student Issues",
+    to: "/admin/student-issues",
+    ariaLabel: "Student Issues",
+    icon: "i-lucide-flag",
+    tooltip: {
+      text: "Student Issues",
+    },
+  },
+  {
     label: "Attendance",
     to: "/admin/attendance",
     ariaLabel: "Attendance",

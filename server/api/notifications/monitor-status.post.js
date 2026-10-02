@@ -1,66 +1,111 @@
+// server/api/notifications/monitor-status.post.js
+//
+// Monitors student status changes and creates in-app admin notifications
+// for configured status changes.
+//
+// This endpoint is called server-to-server (for example, by GitHub Actions),
+// so it uses the Supabase service-role client.
+//
+// Important:
+// previous_status is updated only after the status-change processing has
+// completed successfully. This prevents a failed notification from being
+// permanently lost.
+
 import { createError } from "h3";
 import { serverSupabaseServiceRole } from "#supabase/server";
 
 export default defineEventHandler(async (event) => {
   try {
-    // Server-to-server call (GitHub Actions curl, no user session) --
-    // must use the service role client to bypass RLS. See earlier fix.
+    // ------------------------------------------------------------
+    // 1. Use service role
+    // ------------------------------------------------------------
+    //
+    // This endpoint is called server-to-server and does not have a
+    // browser authentication session. The service-role client also
+    // allows us to create admin_notifications regardless of the
+    // authenticated-user RLS policies.
+
     const client = serverSupabaseServiceRole(event);
 
-    // Get all students with their current status
+    // ------------------------------------------------------------
+    // 2. Get notification settings
+    // ------------------------------------------------------------
+
+    const { data: settings, error: settingsError } = await client
+      .from("notification_settings")
+      .select("*")
+      .single();
+
+    if (settingsError) {
+      throw new Error(
+        `Failed to load notification settings: ${settingsError.message}`,
+      );
+    }
+
+    // ------------------------------------------------------------
+    // 3. Get all students and their current/previous status
+    // ------------------------------------------------------------
+
     const { data: currentStudents, error: studentsError } = await client
       .from("students")
       .select(
         "id, first_name, email, status, cohort_id, program_id, previous_status",
       );
 
-    if (studentsError) throw studentsError;
+    if (studentsError) {
+      throw new Error(`Failed to load students: ${studentsError.message}`);
+    }
 
-    // Get students whose status changed to "At Risk" or "Monitor"
+    // ------------------------------------------------------------
+    // 4. Identify actual status changes
+    // ------------------------------------------------------------
+
     const statusChanges = [];
 
-    for (const student of currentStudents) {
+    for (const student of currentStudents || []) {
       const previousStatus = student.previous_status;
       const currentStatus = student.status;
 
-      // Check if status changed to At Risk or Monitor
       if (previousStatus !== currentStatus) {
-        if (currentStatus === "At Risk" || currentStatus === "Monitor") {
-          statusChanges.push({
-            student_id: student.id,
-            first_name: student.first_name,
-            email: student.email,
-            cohort_id: student.cohort_id,
-            program_id: student.program_id,
-            previous_status: previousStatus,
-            current_status: currentStatus,
-            changed_at: new Date().toISOString(),
-          });
-
-          // Update previous_status to current status
-          await client
-            .from("students")
-            .update({ previous_status: currentStatus })
-            .eq("id", student.id);
-        }
+        statusChanges.push({
+          student_id: student.id,
+          first_name: student.first_name,
+          email: student.email,
+          cohort_id: student.cohort_id,
+          program_id: student.program_id,
+          previous_status: previousStatus,
+          current_status: currentStatus,
+          changed_at: new Date().toISOString(),
+        });
       }
     }
 
-    // If there are status changes, notify admins via in-app inbox
-    // (admin_notifications table). This replaces email/Slack for now
-    // -- SMTP wiring can be reinstated later by uncommenting the
-    // $fetch calls further down, once real SMTP credentials and
-    // notification_settings.email_enabled / slack_enabled are set.
-    if (statusChanges.length > 0) {
-      // Get notification settings (still used to gate at-risk vs
-      // monitor filtering, even though we're not emailing/slacking)
-      const { data: settings } = await client
-        .from("notification_settings")
-        .select("*")
-        .single();
+    // Nothing changed.
+    if (statusChanges.length === 0) {
+      return {
+        success: true,
+        changes_detected: 0,
+        changes: [],
+      };
+    }
 
-      // Log status changes (unchanged from before)
-      await client.from("status_change_log").insert(
+    // ------------------------------------------------------------
+    // 5. Determine which changes should generate notifications
+    // ------------------------------------------------------------
+
+    const notifiableChanges = statusChanges.filter(
+      (change) =>
+        (settings?.notify_on_at_risk && change.current_status === "At Risk") ||
+        (settings?.notify_on_monitor && change.current_status === "Monitor"),
+    );
+
+    // ------------------------------------------------------------
+    // 6. Write status-change audit records
+    // ------------------------------------------------------------
+
+    const { error: statusLogError } = await client
+      .from("status_change_log")
+      .insert(
         statusChanges.map((change) => ({
           student_id: change.student_id,
           previous_status: change.previous_status,
@@ -69,178 +114,94 @@ export default defineEventHandler(async (event) => {
         })),
       );
 
-      // Filter to only the change types the settings say to notify on
-      const notifiableChanges = statusChanges.filter(
-        (c) =>
-          (settings?.notify_on_at_risk && c.current_status === "At Risk") ||
-          (settings?.notify_on_monitor && c.current_status === "Monitor"),
+    if (statusLogError) {
+      throw new Error(
+        `Failed to write status change log: ${statusLogError.message}`,
       );
+    }
 
-      if (notifiableChanges.length > 0) {
-        // Fan out one admin_notifications row per admin per change,
-        // same pattern as report-issue.post.js
-        const { data: admins } = await client.from("admin").select("email");
+    // ------------------------------------------------------------
+    // 7. Create admin notifications
+    // ------------------------------------------------------------
 
-        if (admins && admins.length > 0) {
-          const rows = admins.flatMap((admin) =>
-            notifiableChanges.map((change) => ({
-              admin_email: admin.email,
-              type: "status_change",
-              title: `${change.first_name || "A student"} moved to ${change.current_status}`,
-              body: `Status changed from ${change.previous_status || "Unknown"} to ${change.current_status}.`,
-              entity_type: "student",
-              entity_id: change.student_id,
-              is_read: false,
-            })),
-          );
+    if (notifiableChanges.length > 0) {
+      const { data: admins, error: adminsError } = await client
+        .from("admin")
+        .select("email");
 
-          await client.from("admin_notifications").insert(rows);
-        }
+      if (adminsError) {
+        throw new Error(
+          `Failed to load admins for status notifications: ${adminsError.message}`,
+        );
       }
 
-      // ---- SMTP / Slack (disabled for now, kept for future use) ----
-      // if (settings?.email_enabled && settings.email_recipients?.length > 0) {
-      //     await $fetch('/api/notifications/send-email', {
-      //         method: 'POST',
-      //         body: { recipients: settings.email_recipients, changes: notifiableChanges }
-      //     })
-      // }
-      // if (settings?.slack_enabled && settings.slack_webhook_url) {
-      //     await $fetch('/api/notifications/send-slack', {
-      //         method: 'POST',
-      //         body: { webhook_url: settings.slack_webhook_url, changes: notifiableChanges }
-      //     })
-      // }
+      if (admins && admins.length > 0) {
+        const notificationRows = admins.flatMap((admin) =>
+          notifiableChanges.map((change) => ({
+            admin_email: admin.email,
+            type: "status_change",
+            title: `${change.first_name || "A student"} moved to ${change.current_status}`,
+            body: `Status changed from ${change.previous_status || "Unknown"} to ${change.current_status}.`,
+            entity_type: "student",
+            entity_id: change.student_id,
+            is_read: false,
+          })),
+        );
+
+        const { error: notificationError } = await client
+          .from("admin_notifications")
+          .insert(notificationRows);
+
+        if (notificationError) {
+          throw new Error(
+            `Failed to create admin status notifications: ${notificationError.message}`,
+          );
+        }
+      }
     }
+
+    // ------------------------------------------------------------
+    // 8. Update previous_status
+    // ------------------------------------------------------------
+    //
+    // Only update previous_status after the status-change log and
+    // notification processing have succeeded.
+    //
+    // We update it for every actual status change, not only At Risk
+    // and Monitor. This keeps previous_status synchronized with the
+    // actual student status.
+
+    for (const change of statusChanges) {
+      const { error: updateError } = await client
+        .from("students")
+        .update({
+          previous_status: change.current_status,
+        })
+        .eq("id", change.student_id);
+
+      if (updateError) {
+        throw new Error(
+          `Failed to update previous_status for student ${change.student_id}: ${updateError.message}`,
+        );
+      }
+    }
+
+    // ------------------------------------------------------------
+    // 9. Return result
+    // ------------------------------------------------------------
 
     return {
       success: true,
       changes_detected: statusChanges.length,
+      notifications_created: notifiableChanges.length,
       changes: statusChanges,
     };
   } catch (err) {
     console.error("Status monitoring error:", err);
+
     throw createError({
       statusCode: 500,
       statusMessage: err?.message || "Failed to monitor status changes",
     });
   }
 });
-
-// import { createError } from 'h3'
-// import { serverSupabaseClient } from '#supabase/server'
-
-// export default defineEventHandler(async (event) => {
-//     try {
-//         const client = await serverSupabaseClient(event)
-
-//         // Get all students with their current status
-//         const { data: currentStudents, error: studentsError } = await client
-//             .from('students')
-//             .select('id, first_name, email, status, cohort_id, program_id, previous_status')
-
-//         if (studentsError) throw studentsError
-
-//         // Get students whose status changed to "At Risk" or "Monitor"
-//         const statusChanges = []
-
-//         for (const student of currentStudents) {
-//             const previousStatus = student.previous_status
-//             const currentStatus = student.status
-
-//             // Check if status changed to At Risk or Monitor
-//             if (previousStatus !== currentStatus) {
-//                 if (currentStatus === 'At Risk' || currentStatus === 'Monitor') {
-//                     statusChanges.push({
-//                         student_id: student.id,
-//                         first_name: student.first_name,
-//                         email: student.email,
-//                         cohort_id: student.cohort_id,
-//                         program_id: student.program_id,
-//                         previous_status: previousStatus,
-//                         current_status: currentStatus,
-//                         changed_at: new Date().toISOString()
-//                     })
-
-//                     // Update previous_status to current status
-//                     await client
-//                         .from('students')
-//                         .update({ previous_status: currentStatus })
-//                         .eq('id', student.id)
-//                 }
-//             }
-//         }
-
-//         // If there are status changes, trigger notifications
-//         if (statusChanges.length > 0) {
-//             // Get notification settings
-//             const { data: settings } = await client
-//                 .from('notification_settings')
-//                 .select('*')
-//                 .single()
-
-//             if (settings) {
-//                 // Log status changes
-//                 await client
-//                     .from('status_change_log')
-//                     .insert(statusChanges.map(change => ({
-//                         student_id: change.student_id,
-//                         previous_status: change.previous_status,
-//                         new_status: change.current_status,
-//                         changed_at: change.changed_at
-//                     })))
-
-//                 // Send notifications based on settings
-//                 const notifications = []
-
-//                 if (settings.email_enabled && settings.email_recipients?.length > 0) {
-//                     if ((settings.notify_on_at_risk && statusChanges.some(c => c.current_status === 'At Risk')) ||
-//                         (settings.notify_on_monitor && statusChanges.some(c => c.current_status === 'Monitor'))) {
-//                         notifications.push(
-//                             $fetch('/api/notifications/send-email', {
-//                                 method: 'POST',
-//                                 body: {
-//                                     recipients: settings.email_recipients,
-//                                     changes: statusChanges
-//                                 }
-//                             })
-//                         )
-//                     }
-//                 }
-
-//                 if (settings.slack_enabled && settings.slack_webhook_url) {
-//                     if ((settings.notify_on_at_risk && statusChanges.some(c => c.current_status === 'At Risk')) ||
-//                         (settings.notify_on_monitor && statusChanges.some(c => c.current_status === 'Monitor'))) {
-//                         notifications.push(
-//                             $fetch('/api/notifications/send-slack', {
-//                                 method: 'POST',
-//                                 body: {
-//                                     webhook_url: settings.slack_webhook_url,
-//                                     changes: statusChanges
-//                                 }
-//                             })
-//                         )
-//                     }
-//                 }
-
-//                 // Wait for all notifications to be sent
-//                 if (notifications.length > 0) {
-//                     await Promise.allSettled(notifications)
-//                 }
-//             }
-//         }
-
-//         return {
-//             success: true,
-//             changes_detected: statusChanges.length,
-//             changes: statusChanges
-//         }
-
-//     } catch (err) {
-//         console.error('Status monitoring error:', err)
-//         throw createError({
-//             statusCode: 500,
-//             statusMessage: err?.message || 'Failed to monitor status changes'
-//         })
-//     }
-// })
