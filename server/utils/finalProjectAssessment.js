@@ -7,6 +7,30 @@
 // kept in one place so the two views can never show inconsistent data
 // shapes.
 
+// Section 8: Admin Inbox notifications are per-admin-row
+// (admin_notifications.admin_email is NOT NULL, one row per admin --
+// see server/api/admin/notifications.get.js, which filters by the
+// logged-in admin's own email). So "notify the Admin" means fanning
+// out to every current admin, not writing one shared row. Used by the
+// examiner submit endpoint.
+export async function notifyAllAdmins(supabase, { type, title, body, entityType, entityId }) {
+  const { data: admins, error: adminsError } = await supabase.from('admin').select('email')
+  if (adminsError) throw adminsError
+  if (!admins || admins.length === 0) return
+
+  const { error: insertError } = await supabase.from('admin_notifications').insert(
+    admins.map((a) => ({
+      admin_email: a.email,
+      type,
+      title,
+      body,
+      entity_type: entityType,
+      entity_id: entityId,
+    }))
+  )
+  if (insertError) throw insertError
+}
+
 // Section 15's overall status derivation, from the two independent
 // per-assessment-type submission statuses.
 export function deriveOverallStatus(submissionStatus, presentationStatus) {

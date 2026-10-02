@@ -1,4 +1,4 @@
-import { serverSupabaseClient } from '#supabase/server'
+import { serverSupabaseClient, serverSupabaseServiceRole } from '#supabase/server'
 import { createError, readBody } from 'h3'
 import { requireExaminerForSubmission } from '~/server/utils/finalProjectAuth'
 import { notifyAllAdmins } from '~/server/utils/finalProjectAssessment'
@@ -19,6 +19,7 @@ import { notifyAllAdmins } from '~/server/utils/finalProjectAssessment'
 // Body: { grades: { [criterionId]: number }, signatureText: string }
 export default defineEventHandler(async (event) => {
   const supabase = await serverSupabaseClient(event)
+  const serviceSupabase = serverSupabaseServiceRole(event)
   const submissionId = getRouterParam(event, 'submissionId')
   const { user, examiner, submission, assignment } = await requireExaminerForSubmission(event, supabase, submissionId)
 
@@ -126,7 +127,7 @@ export default defineEventHandler(async (event) => {
     : 'Unknown student'
   const assessmentLabel = submission.assessment_type === 'submission' ? 'Final Project Submission' : 'Final Project Presentation'
 
-  await notifyAllAdmins(supabase, {
+  await notifyAllAdmins(serviceSupabase, {
     type: 'final_project_assessment_submitted',
     title: 'New Final Project Assessment Submitted',
     body: `Student: ${studentName}\nExaminer: ${examiner.name}\nAssessment: ${assessmentLabel}\nAverage Grade: ${averageGrade}`,
