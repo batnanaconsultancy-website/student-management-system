@@ -61,6 +61,55 @@ export async function requireExaminer(event, supabase) {
   return { user, examiner: examinerRow }
 }
 
+// Resolves the caller's examiner record AND verifies they're
+// authorized for one specific submission (i.e. linked to that
+// submission's assignment via final_project_assignment_examiners).
+// Used by every examiner-facing assessment endpoint so "can this
+// person touch this record" is checked the same way everywhere,
+// rather than re-implemented per endpoint. Returns
+// { user, examiner, submission, assignment }.
+export async function requireExaminerForSubmission(event, supabase, submissionId) {
+  const { user, examiner } = await requireExaminer(event, supabase)
+
+  const { data: submission, error: submissionError } = await supabase
+    .from('final_project_submissions')
+    .select('*, final_project_assignments ( *, students ( id, first_name, last_name, email, program_id, cohort_id ) )')
+    .eq('id', submissionId)
+    .maybeSingle()
+
+  if (submissionError) {
+    throw createError({ statusCode: 500, statusMessage: submissionError.message })
+  }
+  if (!submission) {
+    throw createError({ statusCode: 404, statusMessage: 'Assessment not found' })
+  }
+
+  const assignment = submission.final_project_assignments
+
+  const { data: link, error: linkError } = await supabase
+    .from('final_project_assignment_examiners')
+    .select('id')
+    .eq('assignment_id', assignment.id)
+    .eq('examiner_id', examiner.id)
+    .maybeSingle()
+
+  if (linkError) {
+    throw createError({ statusCode: 500, statusMessage: linkError.message })
+  }
+  if (!link) {
+    throw createError({ statusCode: 403, statusMessage: 'You are not assigned as an examiner for this student' })
+  }
+
+  // Section 2: "The system should prevent an examiner from accessing
+  // an assessment that has not been activated by the Admin." A
+  // submission can exist (created at Save time) before activation.
+  if (!assignment.assessment_activated && submission.status === 'ASSIGNED') {
+    throw createError({ statusCode: 403, statusMessage: 'This assessment has not been activated by the admin yet' })
+  }
+
+  return { user, examiner, submission, assignment }
+}
+
 // For endpoints either an admin OR the examiner assigned to that
 // specific record may call (e.g. reading a submission). Returns
 // { user, isAdmin, examiner } -- examiner is null if the caller is an
