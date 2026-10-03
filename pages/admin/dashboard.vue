@@ -1,5 +1,6 @@
 <script setup>
   import { computed, ref } from "vue";
+  import NotificationBell from "~/components/admin/NotificationBell.vue";
   import { CACHE_KEYS } from '~/composables/useCacheInvalidation';
 
   // Page that cannot be accessed without authentication and has logic to log-out a user.
