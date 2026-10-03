@@ -201,13 +201,15 @@ onMounted(async () => {
       </template>
 
       <template #footer="{ collapsed }">
-        <RoleSwitcher />
+        <div class="flex w-full flex-col">
+          <RoleSwitcher />
 
-        <UserMenuAdmin
-          :collapsed="collapsed"
-          :userLabel="userName"
-          :userAvatar="userImg"
-        />
+          <UserMenuAdmin
+            :collapsed="collapsed"
+            :userLabel="userName"
+            :userAvatar="userImg"
+          />
+        </div>
       </template>
     </UDashboardSidebar>
 
