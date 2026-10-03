@@ -119,6 +119,11 @@ const mainLinks: NavigationMenuItem[] = [
         to: "/admin/managment/students",
       },
       {
+        label: "Users",
+        description: "Preview all users and staff capabilities.",
+        to: "/admin/managment/users",
+      },
+      {
         label: "Seasons ",
         description: "Manage seasons start and end date.",
         to: "/admin/managment/seasons",
