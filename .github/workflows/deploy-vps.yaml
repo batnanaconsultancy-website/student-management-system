@@ -56,8 +56,11 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
+          DEPLOY_COMMIT="$(git rev-parse HEAD)"
+          DEPLOY_COMMIT_SHORT="$(git rev-parse --short HEAD)"
+
           echo "== Deployed commit =="
-          git rev-parse --short HEAD
+          echo "$DEPLOY_COMMIT"
           git log -1 --oneline
 
           echo "== Cleaning Nuxt generated files =="
@@ -69,7 +72,7 @@ jobs:
           npm install
 
           echo "== Building Nuxt application =="
-          npm run build
+          NUXT_DEPLOYMENT_COMMIT="$DEPLOY_COMMIT" npm run build
 
           echo "== Verifying production build =="
           test -f .output/server/index.mjs
@@ -77,13 +80,65 @@ jobs:
           echo "Build output:"
           ls -lh .output/server/index.mjs
 
+          echo "== Checking build contains deployment identifier =="
+          if ! grep -q "$DEPLOY_COMMIT" .output/server/index.mjs; then
+            echo "ERROR: Deployment commit was not found in the production build."
+            exit 1
+          fi
+
+          echo "Build contains commit: $DEPLOY_COMMIT_SHORT"
+
           echo "== Restarting application =="
           pm2 restart student-management-system --update-env
 
-          echo "== Checking application status =="
+          echo "== Waiting for application to come online =="
+          sleep 5
+
+          echo "== Checking PM2 status =="
           pm2 status student-management-system
 
-          echo "== Deployment complete =="
+          PM2_STATUS="$(pm2 jlist | node -e "
+          let data = '';
+          process.stdin.on('data', chunk => data += chunk);
+          process.stdin.on('end', () => {
+            const apps = JSON.parse(data);
+            const app = apps.find(x => x.name === 'student-management-system');
+            console.log(app ? app.pm2_env.status : 'missing');
+          });
+          ")"
+
+          if [ "$PM2_STATUS" != "online" ]; then
+            echo "ERROR: PM2 application is not online."
+            exit 1
+          fi
+
+          echo "PM2 status: $PM2_STATUS"
+
+          echo "== Verifying running application build =="
+          DEPLOYMENT_INFO="$(curl -fsS https://sis.amsterdam.tech/api/deployment-info)"
+
+          echo "Deployment endpoint response:"
+          echo "$DEPLOYMENT_INFO"
+
+          RUNNING_COMMIT="$(printf '%s' "$DEPLOYMENT_INFO" | node -e "
+          let data = '';
+          process.stdin.on('data', chunk => data += chunk);
+          process.stdin.on('end', () => {
+            const info = JSON.parse(data);
+            console.log(info.commit || '');
+          });
+          ")"
+
+          if [ "$RUNNING_COMMIT" != "$DEPLOY_COMMIT" ]; then
+            echo "ERROR: Running application commit does not match deployed commit."
+            echo "Expected: $DEPLOY_COMMIT"
+            echo "Running:  $RUNNING_COMMIT"
+            exit 1
+          fi
+
+          echo "Running application matches deployed commit: $DEPLOY_COMMIT_SHORT"
+
+          echo "== Deployment verification successful =="
           REMOTE_SCRIPT
             then
               echo ""
