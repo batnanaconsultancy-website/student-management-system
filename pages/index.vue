@@ -31,11 +31,8 @@ supabase.auth.onAuthStateChange((event, session) => {
     $fetch("/api/auth/clear-google-tokens", { method: "POST" }).catch(() => {});
   }
 
-  // After authentication success, redirect to dashboard
-  if (event === "SIGNED_IN" && session) {
-    console.log("User successfully signed in, redirecting to dashboard...");
-    navigateTo("/students/dashboard");
-  }
+  // Post-login routing is handled by pages/auth/confirm.vue,
+  // after the server verifies the user's primary role.
 });
 
 const signInWithOAuth = async () => {

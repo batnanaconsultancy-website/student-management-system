@@ -37,12 +37,20 @@ watch(
 
         useCookie(`${cookieName}-redirect-path`).value = null;
 
-        // Redirect based on role (admin or student)
+        // Redirect based on primary role.
         if (response.role === "admin") {
           return navigateTo("/admin/dashboard");
-        } else {
-          return navigateTo("/students/dashboard");
         }
+
+        if (response.role === "faculty") {
+          return navigateTo("/faculty/dashboard");
+        }
+
+        if (response.role === "examiner") {
+          return navigateTo("/examiner/dashboard");
+        }
+
+        return navigateTo("/students/dashboard");
       } catch (err) {
         return navigateTo("/?error=auth");
       }

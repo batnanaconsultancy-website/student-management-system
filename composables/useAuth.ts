@@ -1,138 +1,224 @@
-import { useState } from "nuxt/app"
-import type { User } from "@supabase/supabase-js"
+import { useState } from "nuxt/app";
+import type { User } from "@supabase/supabase-js";
+
+type FacultyProfile = {
+  id: string;
+  name: string;
+  email: string;
+  is_active: boolean;
+};
+
+type ExaminerProfile = {
+  id: string;
+  name: string;
+};
 
 export const useAuth = () => {
-    // Use useState to create a global reactive user state (like in the tutorial)
-    const user = useState<User | null>('user', () => null)
-    // Add role state to track user's role (admin or user)
-    const role = useState<string>('role', () => 'guest')
+  const user = useState<User | null>("user", () => null);
 
-    // Examiner is an INDEPENDENT capability, not a replacement for
-    // role above -- someone can be role='admin' (or role='user', for a
-    // student who happens to also be an examiner... though in
-    // practice examiners are usually staff) AND isExaminer=true at
-    // the same time. A person who is ONLY an examiner (not in the
-    // admin table) gets role='examiner' so they don't fall through
-    // into student-only pages that assume every 'user' has a student
-    // record. See migrations/2026-10-01-create-final-project-assessment-tables.sql.
-    const isExaminer = useState<boolean>('isExaminer', () => false)
-    const examinerProfile = useState<{ id: string; name: string } | null>('examinerProfile', () => null)
+  // Primary role:
+  // admin | faculty | user | examiner | guest
+  //
+  // "examiner" remains temporarily as a legacy fallback for existing
+  // examiner accounts that have not yet been added to faculty.
+  const role = useState<string>("role", () => "guest");
 
-    // Get the Supabase client from @nuxtjs/supabase module
-    const supabase = useSupabaseClient()    // Also get the built-in user state for comparison/fallback
-    const supabaseUser = useSupabaseUser()
+  // Faculty is a staff identity/capability.
+  const isFaculty = useState<boolean>("isFaculty", () => false);
 
-    const getUser = async () => {
-        const { data, error } = await supabase.auth.getUser()
+  const facultyProfile = useState<FacultyProfile | null>(
+    "facultyProfile",
+    () => null,
+  );
 
-        if (error) {
-            user.value = null
-            role.value = 'guest'
-            isExaminer.value = false
-            examinerProfile.value = null
-            return null
-        }
+  // Examiner is an independent capability.
+  // A faculty member may also be an examiner.
+  const isExaminer = useState<boolean>("isExaminer", () => false);
 
-        if (data.user) {
-            user.value = data.user
+  const examinerProfile = useState<ExaminerProfile | null>(
+    "examinerProfile",
+    () => null,
+  );
 
-            // Check admin status and examiner status in parallel --
-            // these are independent, not mutually exclusive.
-            const [adminResult, examinerResult] = await Promise.all([
-                supabase.from("admin").select("email").eq("email", data.user.email).maybeSingle(),
-                supabase.from("examiners").select("id, name").eq("email", data.user.email?.toLowerCase()).eq("is_active", true).maybeSingle(),
-            ])
+  const supabase = useSupabaseClient();
+  const supabaseUser = useSupabaseUser();
 
-            const isAdminUser = Boolean(adminResult.data && !adminResult.error)
-            const examinerRecord = examinerResult.data && !examinerResult.error ? examinerResult.data : null
+  const resetAuthState = () => {
+    user.value = null;
+    role.value = "guest";
+    isFaculty.value = false;
+    facultyProfile.value = null;
+    isExaminer.value = false;
+    examinerProfile.value = null;
+  };
 
-            isExaminer.value = Boolean(examinerRecord)
-            examinerProfile.value = examinerRecord ? { id: examinerRecord.id, name: examinerRecord.name } : null
+  const getUser = async () => {
+    const { data, error } = await supabase.auth.getUser();
 
-            if (isAdminUser) {
-                role.value = 'admin'
-            } else if (examinerRecord) {
-                // Pure examiner: not an admin, and not assumed to have a
-                // student record either -- gets their own role so they
-                // land on an examiner-specific area instead of the
-                // student dashboard.
-                role.value = 'examiner'
-            } else {
-                role.value = 'user'
-            }
-        } else {
-            user.value = null
-            role.value = 'guest'
-            isExaminer.value = false
-            examinerProfile.value = null
-        }
-
-        return data.user
+    if (error || !data.user) {
+      resetAuthState();
+      return null;
     }
 
-    const signInWithGoogle = async () => {
-        // Get the current origin to make redirect URL dynamic
-        const redirectUrl = `${window.location.origin}/auth/confirm`
+    user.value = data.user;
 
-        const { data, error } = await supabase.auth.signInWithOAuth({
-            provider: "google",
-            options: {
-                scopes: "https://www.googleapis.com/auth/calendar.readonly",
-                redirectTo: redirectUrl,
-                queryParams: { access_type: "offline", prompt: "consent" },
-            },
-        })
+    const email = (data.user.email || "").toLowerCase();
 
-        if (error) {
-            return { data: null, error }
+    // Admin, Faculty and Examiner are checked independently.
+    //
+    // This allows:
+    // - admin only
+    // - faculty only
+    // - faculty + examiner
+    // - admin + examiner
+    // - admin + faculty
+    // - admin + faculty + examiner
+    const [adminResult, facultyResult, examinerResult] = await Promise.all([
+      supabase
+        .from("admin")
+        .select("email")
+        .eq("email", data.user.email)
+        .maybeSingle(),
+
+      supabase
+        .from("faculty")
+        .select("id, name, email, is_active")
+        .eq("email", email)
+        .eq("is_active", true)
+        .maybeSingle(),
+
+      supabase
+        .from("examiners")
+        .select("id, name")
+        .eq("email", email)
+        .eq("is_active", true)
+        .maybeSingle(),
+    ]);
+
+    const isAdminUser = Boolean(adminResult.data && !adminResult.error);
+
+    const facultyRecord =
+      facultyResult.data && !facultyResult.error ? facultyResult.data : null;
+
+    const examinerRecord =
+      examinerResult.data && !examinerResult.error ? examinerResult.data : null;
+
+    isFaculty.value = Boolean(facultyRecord);
+
+    facultyProfile.value = facultyRecord
+      ? {
+          id: facultyRecord.id,
+          name: facultyRecord.name,
+          email: facultyRecord.email,
+          is_active: facultyRecord.is_active,
         }
+      : null;
 
-        return { data, error: null }
+    isExaminer.value = Boolean(examinerRecord);
+
+    examinerProfile.value = examinerRecord
+      ? {
+          id: examinerRecord.id,
+          name: examinerRecord.name,
+        }
+      : null;
+
+    // Primary role.
+    //
+    // Admin always remains admin.
+    // Otherwise a Faculty member is faculty.
+    // Examiner-only accounts remain temporarily supported.
+    if (isAdminUser) {
+      role.value = "admin";
+    } else if (facultyRecord) {
+      role.value = "faculty";
+    } else if (examinerRecord) {
+      // Temporary compatibility for existing examiner accounts.
+      role.value = "examiner";
+    } else {
+      role.value = "user";
     }
 
-    const signOut = async () => {
-        const { error } = await supabase.auth.signOut()
+    return data.user;
+  };
 
-        if (!error) {
-            user.value = null
-            role.value = 'guest'
-            isExaminer.value = false
-            examinerProfile.value = null
-        }
+  const signInWithGoogle = async () => {
+    const redirectUrl = `${window.location.origin}/auth/confirm`;
 
-        return { error }
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        scopes: "https://www.googleapis.com/auth/calendar.readonly",
+        redirectTo: redirectUrl,
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+        },
+      },
+    });
+
+    if (error) {
+      return { data: null, error };
     }
-
-    // Watch for changes in the supabase user state and sync with our local state
-    watch(supabaseUser, (newUser) => {
-        user.value = newUser
-        if (!newUser) {
-            role.value = 'guest'
-            isExaminer.value = false
-            examinerProfile.value = null
-        }
-    }, { immediate: true })
-
-    // Helper functions for role checking
-    const isAdmin = () => role.value === 'admin'
-    const isUser = () => role.value === 'user'
-    const isAuthenticated = () => !!user.value
-    // Independent of role -- true for BOTH admin-who-is-also-examiner
-    // and pure (role === 'examiner') examiners.
-    const isExaminerUser = () => isExaminer.value
 
     return {
-        user, // Global reactive user state
-        role, // Primary role: 'admin' | 'examiner' | 'user' | 'guest'
-        isExaminer, // Independent capability flag -- can be true even when role === 'admin'
-        examinerProfile, // { id, name } when isExaminer is true, else null
-        getUser,
-        signInWithGoogle,
-        signOut,
-        // Helper functions
-        isAdmin,
-        isUser,
-        isAuthenticated,
-        isExaminerUser,
+      data,
+      error: null,
+    };
+  };
+
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut();
+
+    if (!error) {
+      resetAuthState();
     }
-}
+
+    return { error };
+  };
+
+  watch(
+    supabaseUser,
+    (newUser) => {
+      user.value = newUser;
+
+      if (!newUser) {
+        resetAuthState();
+      }
+    },
+    {
+      immediate: true,
+    },
+  );
+
+  const isAdmin = () => role.value === "admin";
+
+  const isFacultyUser = () => isFaculty.value;
+
+  const isUser = () => role.value === "user";
+
+  const isAuthenticated = () => !!user.value;
+
+  const isExaminerUser = () => isExaminer.value;
+
+  return {
+    user,
+    role,
+
+    isFaculty,
+    facultyProfile,
+
+    isExaminer,
+    examinerProfile,
+
+    getUser,
+    signInWithGoogle,
+    signOut,
+
+    isAdmin,
+    isFacultyUser,
+    isUser,
+    isAuthenticated,
+    isExaminerUser,
+  };
+};

@@ -1,12 +1,26 @@
-import { defineNuxtRouteMiddleware, navigateTo } from "nuxt/app"
+import { defineNuxtRouteMiddleware, navigateTo } from "nuxt/app";
 
 export default defineNuxtRouteMiddleware(async () => {
-    const { role, getUser } = useAuth()
+  const { role, getUser } = useAuth();
 
-    // Ensure we have the latest user data and role
-    await getUser()
+  // Ensure we have the latest user data and role.
+  await getUser();
 
-    if (role.value !== "admin") {
-        return navigateTo("/students/dashboard") // Redirect non-admins to student dashboard
-    }
-})
+  if (role.value === "admin") {
+    return;
+  }
+
+  if (role.value === "faculty") {
+    return navigateTo("/faculty/dashboard");
+  }
+
+  if (role.value === "examiner") {
+    return navigateTo("/examiner/dashboard");
+  }
+
+  if (role.value === "user") {
+    return navigateTo("/students/dashboard");
+  }
+
+  return navigateTo("/");
+});

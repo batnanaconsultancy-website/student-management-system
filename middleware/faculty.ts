@@ -1,25 +1,22 @@
-// middleware/guest.ts
-// Runs on pages intended for unauthenticated users, such as the login page.
+import { defineNuxtRouteMiddleware, navigateTo } from "nuxt/app";
 
 export default defineNuxtRouteMiddleware(async () => {
-  console.log("Guest middleware");
+  const { getUser, role } = useAuth();
 
   const supabaseUser = useSupabaseUser();
 
   if (!supabaseUser.value) {
-    return;
+    return navigateTo("/");
   }
-
-  const { getUser, role } = useAuth();
 
   await getUser();
 
-  if (role.value === "admin") {
-    return navigateTo("/admin/dashboard");
+  if (role.value === "faculty") {
+    return;
   }
 
-  if (role.value === "faculty") {
-    return navigateTo("/faculty/dashboard");
+  if (role.value === "admin") {
+    return navigateTo("/admin/dashboard");
   }
 
   if (role.value === "examiner") {
