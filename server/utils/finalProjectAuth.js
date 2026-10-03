@@ -1,141 +1,282 @@
-import { createError } from 'h3'
-import { serverSupabaseUser } from '#supabase/server'
+import { createError } from "h3";
+import { serverSupabaseUser } from "#supabase/server";
 
 // server/utils/finalProjectAuth.js
 //
 // Auth helpers for the Final Project Assessment module's API
-// endpoints. Mirrors the requireCanvasMastersAdmin pattern in
-// server/utils/canvasMastersRoster.js so all the "who is this request
-// allowed to act as" logic lives in one place per module, rather than
-// being copy-pasted into every endpoint.
+// endpoints.
+//
+// Capability model:
+//   - Admin = admin table membership
+//   - Faculty = active faculty table membership
+//   - Examiner = active teaching Faculty + active examiner record
+//
+// Admin and Examiner are independent capabilities layered on top
+// of the Faculty model. An Admin who is also an Examiner can still
+// use Examiner-facing endpoints.
 
-// Any admin has full access to every Final Project Assessment record
-// -- no per-admin scoping, matching every other admin table in this
-// app.
+// Any admin has full access to every Final Project Assessment record.
 export async function requireFinalProjectAdmin(event, supabase) {
-  const user = await serverSupabaseUser(event)
+  const user = await serverSupabaseUser(event);
+
   if (!user?.email) {
-    throw createError({ statusCode: 401, statusMessage: 'Not authenticated' })
+    throw createError({
+      statusCode: 401,
+      statusMessage: "Not authenticated",
+    });
   }
 
   const { data: adminRow, error: adminError } = await supabase
-    .from('admin')
-    .select('email')
-    .eq('email', user.email)
-    .maybeSingle()
+    .from("admin")
+    .select("email")
+    .eq("email", user.email)
+    .maybeSingle();
 
   if (adminError) {
-    throw createError({ statusCode: 500, statusMessage: adminError.message })
+    throw createError({
+      statusCode: 500,
+      statusMessage: adminError.message,
+    });
   }
+
   if (!adminRow) {
-    throw createError({ statusCode: 403, statusMessage: 'Admin access required' })
+    throw createError({
+      statusCode: 403,
+      statusMessage: "Admin access required",
+    });
   }
 
-  return user
+  return user;
 }
 
-// Resolves the caller's examiner record. Independent of admin status
-// -- an admin who is ALSO an examiner still resolves here when they're
-// using examiner-facing endpoints (e.g. submitting their own
-// assessment as an examiner).
+// Resolves the caller's Examiner record.
+//
+// Examiner access requires:
+//   1. An active Faculty record
+//   2. Faculty staff_type = "teaching"
+//   3. An active Examiner record
+//
+// This preserves the existing Examiner workflow while enforcing
+// the new Faculty-based capability model.
 export async function requireExaminer(event, supabase) {
-  const user = await serverSupabaseUser(event)
+  const user = await serverSupabaseUser(event);
+
   if (!user?.email) {
-    throw createError({ statusCode: 401, statusMessage: 'Not authenticated' })
+    throw createError({
+      statusCode: 401,
+      statusMessage: "Not authenticated",
+    });
   }
 
-  const { data: examinerRow, error: examinerError } = await supabase
-    .from('examiners')
-    .select('id, email, name')
-    .eq('email', user.email.toLowerCase())
-    .eq('is_active', true)
-    .maybeSingle()
+  const email = user.email.toLowerCase();
 
-  if (examinerError) {
-    throw createError({ statusCode: 500, statusMessage: examinerError.message })
-  }
-  if (!examinerRow) {
-    throw createError({ statusCode: 403, statusMessage: 'Examiner access required' })
+  const [facultyResult, examinerResult] = await Promise.all([
+    supabase
+      .from("faculty")
+      .select("id, email, name, is_active, staff_type")
+      .eq("email", email)
+      .eq("is_active", true)
+      .maybeSingle(),
+
+    supabase
+      .from("examiners")
+      .select("id, email, name")
+      .eq("email", email)
+      .eq("is_active", true)
+      .maybeSingle(),
+  ]);
+
+  if (facultyResult.error) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: facultyResult.error.message,
+    });
   }
 
-  return { user, examiner: examinerRow }
+  if (examinerResult.error) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: examinerResult.error.message,
+    });
+  }
+
+  const faculty = facultyResult.data;
+  const examiner = examinerResult.data;
+
+  if (!faculty || faculty.staff_type !== "teaching" || !examiner) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: "Examiner access requires teaching Faculty status",
+    });
+  }
+
+  return {
+    user,
+    examiner,
+  };
 }
 
-// Resolves the caller's examiner record AND verifies they're
-// authorized for one specific submission (i.e. linked to that
-// submission's assignment via final_project_assignment_examiners).
-// Used by every examiner-facing assessment endpoint so "can this
-// person touch this record" is checked the same way everywhere,
-// rather than re-implemented per endpoint. Returns
-// { user, examiner, submission, assignment }.
-export async function requireExaminerForSubmission(event, supabase, submissionId) {
-  const { user, examiner } = await requireExaminer(event, supabase)
+// Resolves the caller's Examiner record AND verifies they're
+// authorized for one specific submission.
+//
+// The examiner must:
+//   - be an active teaching Faculty member
+//   - have an active Examiner record
+//   - be assigned to the submission
+//
+// Returns:
+//   { user, examiner, submission, assignment }
+export async function requireExaminerForSubmission(
+  event,
+  supabase,
+  submissionId,
+) {
+  const { user, examiner } = await requireExaminer(event, supabase);
 
   const { data: submission, error: submissionError } = await supabase
-    .from('final_project_submissions')
-    .select('*, final_project_assignments ( *, students ( id, first_name, last_name, email, program_id, cohort_id ) )')
-    .eq('id', submissionId)
-    .maybeSingle()
+    .from("final_project_submissions")
+    .select(
+      "*, final_project_assignments ( *, students ( id, first_name, last_name, email, program_id, cohort_id ) )",
+    )
+    .eq("id", submissionId)
+    .maybeSingle();
 
   if (submissionError) {
-    throw createError({ statusCode: 500, statusMessage: submissionError.message })
-  }
-  if (!submission) {
-    throw createError({ statusCode: 404, statusMessage: 'Assessment not found' })
+    throw createError({
+      statusCode: 500,
+      statusMessage: submissionError.message,
+    });
   }
 
-  const assignment = submission.final_project_assignments
+  if (!submission) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: "Assessment not found",
+    });
+  }
+
+  const assignment = submission.final_project_assignments;
 
   const { data: link, error: linkError } = await supabase
-    .from('final_project_assignment_examiners')
-    .select('id')
-    .eq('assignment_id', assignment.id)
-    .eq('examiner_id', examiner.id)
-    .maybeSingle()
+    .from("final_project_assignment_examiners")
+    .select("id")
+    .eq("assignment_id", assignment.id)
+    .eq("examiner_id", examiner.id)
+    .maybeSingle();
 
   if (linkError) {
-    throw createError({ statusCode: 500, statusMessage: linkError.message })
+    throw createError({
+      statusCode: 500,
+      statusMessage: linkError.message,
+    });
   }
+
   if (!link) {
-    throw createError({ statusCode: 403, statusMessage: 'You are not assigned as an examiner for this student' })
+    throw createError({
+      statusCode: 403,
+      statusMessage: "You are not assigned as an examiner for this student",
+    });
   }
 
-  // Section 2: "The system should prevent an examiner from accessing
-  // an assessment that has not been activated by the Admin." A
-  // submission can exist (created at Save time) before activation.
-  if (!assignment.assessment_activated && submission.status === 'ASSIGNED') {
-    throw createError({ statusCode: 403, statusMessage: 'This assessment has not been activated by the admin yet' })
+  // The assessment must be activated by an Admin before an
+  // assigned Examiner can access it.
+  if (!assignment.assessment_activated && submission.status === "ASSIGNED") {
+    throw createError({
+      statusCode: 403,
+      statusMessage: "This assessment has not been activated by the admin yet",
+    });
   }
 
-  return { user, examiner, submission, assignment }
+  return {
+    user,
+    examiner,
+    submission,
+    assignment,
+  };
 }
 
-// For endpoints either an admin OR the examiner assigned to that
-// specific record may call (e.g. reading a submission). Returns
-// { user, isAdmin, examiner } -- examiner is null if the caller is an
-// admin with no examiner record. Does NOT check assignment-level
-// scoping (which examiner is linked to which student) -- that's left
-// to Postgres RLS on the underlying tables, since it already encodes
-// exactly that rule (see the migration's "examiner reads own" style
-// policies). This helper only establishes identity, not per-row
-// authorization.
+// Allows either:
+//   - an Admin
+//   - an active teaching Faculty member with an active Examiner record
+//
+// For Examiner callers, this helper establishes Examiner identity.
+// Assignment-level authorization remains handled separately where
+// required by the endpoint/database policies.
 export async function requireFinalProjectAdminOrExaminer(event, supabase) {
-  const user = await serverSupabaseUser(event)
+  const user = await serverSupabaseUser(event);
+
   if (!user?.email) {
-    throw createError({ statusCode: 401, statusMessage: 'Not authenticated' })
+    throw createError({
+      statusCode: 401,
+      statusMessage: "Not authenticated",
+    });
   }
 
-  const [adminResult, examinerResult] = await Promise.all([
-    supabase.from('admin').select('email').eq('email', user.email).maybeSingle(),
-    supabase.from('examiners').select('id, email, name').eq('email', user.email.toLowerCase()).eq('is_active', true).maybeSingle(),
-  ])
+  const email = user.email.toLowerCase();
 
-  const isAdminUser = Boolean(adminResult.data && !adminResult.error)
-  const examiner = examinerResult.data && !examinerResult.error ? examinerResult.data : null
+  const [adminResult, facultyResult, examinerResult] = await Promise.all([
+    supabase
+      .from("admin")
+      .select("email")
+      .eq("email", user.email)
+      .maybeSingle(),
 
-  if (!isAdminUser && !examiner) {
-    throw createError({ statusCode: 403, statusMessage: 'Admin or examiner access required' })
+    supabase
+      .from("faculty")
+      .select("id, email, name, is_active, staff_type")
+      .eq("email", email)
+      .eq("is_active", true)
+      .maybeSingle(),
+
+    supabase
+      .from("examiners")
+      .select("id, email, name")
+      .eq("email", email)
+      .eq("is_active", true)
+      .maybeSingle(),
+  ]);
+
+  if (adminResult.error) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: adminResult.error.message,
+    });
   }
 
-  return { user, isAdmin: isAdminUser, examiner }
+  if (facultyResult.error) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: facultyResult.error.message,
+    });
+  }
+
+  if (examinerResult.error) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: examinerResult.error.message,
+    });
+  }
+
+  const isAdminUser = Boolean(adminResult.data);
+
+  const faculty = facultyResult.data;
+  const examiner = examinerResult.data;
+
+  const isTeachingFaculty =
+    Boolean(faculty) && faculty.staff_type === "teaching";
+
+  const validExaminer = isTeachingFaculty && Boolean(examiner);
+
+  if (!isAdminUser && !validExaminer) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: "Admin or teaching Faculty Examiner access required",
+    });
+  }
+
+  return {
+    user,
+    isAdmin: isAdminUser,
+    examiner: validExaminer ? examiner : null,
+  };
 }

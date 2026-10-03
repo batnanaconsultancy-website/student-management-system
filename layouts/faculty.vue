@@ -112,6 +112,8 @@ onMounted(() => {
       </template>
 
       <template #footer="{ collapsed }">
+        <RoleSwitcher />
+
         <div
           class="flex items-center gap-2 p-2"
           :class="collapsed ? 'justify-center' : ''"

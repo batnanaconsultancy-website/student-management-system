@@ -1,11 +1,14 @@
 import { useState } from "nuxt/app";
 import type { User } from "@supabase/supabase-js";
 
+type Role = "admin" | "faculty" | "examiner" | "user" | "guest";
+
 type FacultyProfile = {
   id: string;
   name: string;
   email: string;
   is_active: boolean;
+  staff_type: "teaching" | "non_teaching";
 };
 
 type ExaminerProfile = {
@@ -16,14 +19,34 @@ type ExaminerProfile = {
 export const useAuth = () => {
   const user = useState<User | null>("user", () => null);
 
-  // Primary role:
-  // admin | faculty | user | examiner | guest
-  //
-  // "examiner" remains temporarily as a legacy fallback for existing
-  // examiner accounts that have not yet been added to faculty.
-  const role = useState<string>("role", () => "guest");
+  /*
+   * The dashboards/capabilities this user can switch between.
+   *
+   * Examples:
+   *   Faculty only             -> ["faculty"]
+   *   Faculty + Admin          -> ["admin", "faculty"]
+   *   Faculty + Examiner       -> ["faculty", "examiner"]
+   *   Faculty + Admin + Exam.  -> ["admin", "faculty", "examiner"]
+   *   Student only             -> ["user"]
+   */
+  const availableRoles = useState<Role[]>("availableRoles", () => []);
 
-  // Faculty is a staff identity/capability.
+  /*
+   * The dashboard the user is currently using.
+   *
+   * This is a UI/navigation state.
+   * Backend authorization remains based on the actual database records.
+   */
+  const activeRole = useState<Role>("activeRole", () => "guest");
+
+  /*
+   * Backwards-compatible alias.
+   *
+   * Existing middleware already uses role.value.
+   * It now represents the currently selected dashboard.
+   */
+  const role = activeRole;
+
   const isFaculty = useState<boolean>("isFaculty", () => false);
 
   const facultyProfile = useState<FacultyProfile | null>(
@@ -31,8 +54,6 @@ export const useAuth = () => {
     () => null,
   );
 
-  // Examiner is an independent capability.
-  // A faculty member may also be an examiner.
   const isExaminer = useState<boolean>("isExaminer", () => false);
 
   const examinerProfile = useState<ExaminerProfile | null>(
@@ -45,11 +66,18 @@ export const useAuth = () => {
 
   const resetAuthState = () => {
     user.value = null;
-    role.value = "guest";
+    availableRoles.value = [];
+    activeRole.value = "guest";
     isFaculty.value = false;
     facultyProfile.value = null;
     isExaminer.value = false;
     examinerProfile.value = null;
+  };
+
+  const setActiveRole = (newRole: Role) => {
+    if (availableRoles.value.includes(newRole)) {
+      activeRole.value = newRole;
+    }
   };
 
   const getUser = async () => {
@@ -64,15 +92,6 @@ export const useAuth = () => {
 
     const email = (data.user.email || "").toLowerCase();
 
-    // Admin, Faculty and Examiner are checked independently.
-    //
-    // This allows:
-    // - admin only
-    // - faculty only
-    // - faculty + examiner
-    // - admin + examiner
-    // - admin + faculty
-    // - admin + faculty + examiner
     const [adminResult, facultyResult, examinerResult] = await Promise.all([
       supabase
         .from("admin")
@@ -82,7 +101,7 @@ export const useAuth = () => {
 
       supabase
         .from("faculty")
-        .select("id, name, email, is_active")
+        .select("id, name, email, is_active, staff_type")
         .eq("email", email)
         .eq("is_active", true)
         .maybeSingle(),
@@ -103,6 +122,9 @@ export const useAuth = () => {
     const examinerRecord =
       examinerResult.data && !examinerResult.error ? examinerResult.data : null;
 
+    /*
+     * Faculty is the base staff membership.
+     */
     isFaculty.value = Boolean(facultyRecord);
 
     facultyProfile.value = facultyRecord
@@ -111,32 +133,73 @@ export const useAuth = () => {
           name: facultyRecord.name,
           email: facultyRecord.email,
           is_active: facultyRecord.is_active,
+          staff_type: facultyRecord.staff_type,
         }
       : null;
 
-    isExaminer.value = Boolean(examinerRecord);
+    /*
+     * Examiner is only a valid capability for:
+     *
+     *   Faculty
+     *   +
+     *   Teaching staff
+     *   +
+     *   active examiner record
+     */
+    const isTeachingFaculty = facultyRecord?.staff_type === "teaching";
 
-    examinerProfile.value = examinerRecord
-      ? {
-          id: examinerRecord.id,
-          name: examinerRecord.name,
-        }
-      : null;
+    const isValidExaminer =
+      Boolean(examinerRecord) && Boolean(facultyRecord) && isTeachingFaculty;
 
-    // Primary role.
-    //
-    // Admin always remains admin.
-    // Otherwise a Faculty member is faculty.
-    // Examiner-only accounts remain temporarily supported.
+    isExaminer.value = isValidExaminer;
+
+    examinerProfile.value =
+      isValidExaminer && examinerRecord
+        ? {
+            id: examinerRecord.id,
+            name: examinerRecord.name,
+          }
+        : null;
+
+    /*
+     * Build available dashboards.
+     *
+     * Admin and Examiner are capabilities layered on top
+     * of the Faculty membership.
+     */
+    const roles: Role[] = [];
+
     if (isAdminUser) {
-      role.value = "admin";
-    } else if (facultyRecord) {
-      role.value = "faculty";
-    } else if (examinerRecord) {
-      // Temporary compatibility for existing examiner accounts.
-      role.value = "examiner";
-    } else {
-      role.value = "user";
+      roles.push("admin");
+    }
+
+    if (facultyRecord) {
+      roles.push("faculty");
+    }
+
+    if (isValidExaminer) {
+      roles.push("examiner");
+    }
+
+    /*
+     * If the account has no Faculty/Admin/Examiner access,
+     * it remains an ordinary student/user.
+     */
+    if (roles.length === 0) {
+      roles.push("user");
+    }
+
+    availableRoles.value = roles;
+
+    /*
+     * Preserve the currently selected dashboard if it is still
+     * available. Otherwise use the first available dashboard.
+     *
+     * Admin is intentionally first when available, preserving
+     * the existing behavior for Henry.
+     */
+    if (!availableRoles.value.includes(activeRole.value)) {
+      activeRole.value = availableRoles.value[0];
     }
 
     return data.user;
@@ -191,30 +254,35 @@ export const useAuth = () => {
     },
   );
 
-  const isAdmin = () => role.value === "admin";
-
+  const isAdmin = () => activeRole.value === "admin";
   const isFacultyUser = () => isFaculty.value;
-
-  const isUser = () => role.value === "user";
-
+  const isUser = () => activeRole.value === "user";
   const isAuthenticated = () => !!user.value;
-
   const isExaminerUser = () => isExaminer.value;
 
   return {
     user,
-    role,
 
+    // Dashboard switching
+    role,
+    activeRole,
+    availableRoles,
+    setActiveRole,
+
+    // Faculty
     isFaculty,
     facultyProfile,
 
+    // Examiner capability
     isExaminer,
     examinerProfile,
 
+    // Authentication
     getUser,
     signInWithGoogle,
     signOut,
 
+    // Helpers
     isAdmin,
     isFacultyUser,
     isUser,

@@ -70,7 +70,6 @@ const mainLinks: NavigationMenuItem[] = [
       text: "Final Project Assessment",
     },
   },
-
   {
     label: "Analytics",
     icon: "i-pajamas:chart",
@@ -152,12 +151,14 @@ const mainLinks: NavigationMenuItem[] = [
 ];
 
 onMounted(async () => {
-  // Initialize active link based on current route or default to first link
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
   userName.value = user?.user_metadata?.full_name || "Unknown User";
+
   userImg.value = user?.user_metadata?.picture;
+
   appConfig.ui.colors.primary = "blue";
   appConfig.ui.colors.neutral = "stone";
 });
@@ -178,7 +179,7 @@ onMounted(async () => {
           size="xs"
           :class="collapsed ? 'm-auto' : 'ml-2'"
         />
-        <!-- <NuxtImg src="../public/favicon.png" alt="Logo" class="h-6" :class="collapsed ? 'm-auto' : 'ml-2'" /> -->
+
         <p
           v-if="!collapsed"
           class="text-center text-xs xl:text-base font-semibold text-highlighted"
@@ -200,6 +201,8 @@ onMounted(async () => {
       </template>
 
       <template #footer="{ collapsed }">
+        <RoleSwitcher />
+
         <UserMenuAdmin
           :collapsed="collapsed"
           :userLabel="userName"

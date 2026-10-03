@@ -16,17 +16,21 @@ export default defineEventHandler(async (event) => {
 
     const email = (user.email || "").toLowerCase();
 
-    console.log("Checking role for user:", email);
+    console.log("Checking capabilities for user:", email);
 
-    // These are independent capabilities.
-    //
-    // A person may be:
-    // - admin
-    // - faculty
-    // - examiner
-    // - admin + examiner
-    // - faculty + examiner
-    // - admin + faculty + examiner
+    /*
+     * Capability model:
+     *
+     * Faculty = active Faculty record.
+     *
+     * Admin = active/registered Admin record.
+     *
+     * Examiner = active Faculty member whose staff_type is
+     * "teaching" AND who has an active Examiner record.
+     *
+     * Admin, Faculty and Examiner are therefore capabilities
+     * that can coexist for the same user.
+     */
     const [adminResult, facultyResult, examinerResult] = await Promise.all([
       client
         .from("admin")
@@ -36,7 +40,7 @@ export default defineEventHandler(async (event) => {
 
       client
         .from("faculty")
-        .select("id, name, email, is_active")
+        .select("id, name, email, is_active, staff_type")
         .eq("email", email)
         .eq("is_active", true)
         .maybeSingle(),
@@ -51,19 +55,32 @@ export default defineEventHandler(async (event) => {
 
     const isAdminUser = Boolean(adminResult.data && !adminResult.error);
 
-    const isFacultyUser = Boolean(facultyResult.data && !facultyResult.error);
+    const facultyRecord =
+      facultyResult.data && !facultyResult.error ? facultyResult.data : null;
 
-    const isExaminerUser = Boolean(
-      examinerResult.data && !examinerResult.error,
-    );
+    const examinerRecord =
+      examinerResult.data && !examinerResult.error ? examinerResult.data : null;
 
-    // Primary role.
-    //
-    // Admin takes priority.
-    // Faculty is the normal staff role.
-    // Examiner-only accounts are temporarily supported so that
-    // existing examiner accounts continue working while we migrate
-    // them into Faculty.
+    const isFacultyUser = Boolean(facultyRecord);
+
+    /*
+     * Examiner capability requires:
+     *
+     *   1. Active Faculty membership
+     *   2. Teaching staff type
+     *   3. Active Examiner record
+     */
+    const isTeachingFaculty = facultyRecord?.staff_type === "teaching";
+
+    const isExaminerUser =
+      Boolean(examinerRecord) && Boolean(facultyRecord) && isTeachingFaculty;
+
+    /*
+     * Determine the initial dashboard.
+     *
+     * Admin remains the default when available, preserving the
+     * current behavior for existing Admin users such as Henry.
+     */
     let role = "user";
 
     if (isAdminUser) {
@@ -74,14 +91,13 @@ export default defineEventHandler(async (event) => {
       role = "examiner";
     }
 
-    console.log(
-      "Role determined:",
+    console.log("Capabilities determined:", {
       role,
-      "isFaculty:",
-      isFacultyUser,
-      "isExaminer:",
-      isExaminerUser,
-    );
+      isAdmin: isAdminUser,
+      isFaculty: isFacultyUser,
+      staffType: facultyRecord?.staff_type || null,
+      isExaminer: isExaminerUser,
+    });
 
     // Keep the existing calendar behavior.
     shareCalendarWithEmail(user.email).catch((err) => {
@@ -96,28 +112,30 @@ export default defineEventHandler(async (event) => {
       success: true,
       role,
 
-      // Independent capabilities.
+      // Capabilities.
+      isAdmin: isAdminUser,
       isFaculty: isFacultyUser,
       isExaminer: isExaminerUser,
 
       facultyProfile: isFacultyUser
         ? {
-            id: facultyResult.data.id,
-            name: facultyResult.data.name,
-            email: facultyResult.data.email,
-            is_active: facultyResult.data.is_active,
+            id: facultyRecord.id,
+            name: facultyRecord.name,
+            email: facultyRecord.email,
+            is_active: facultyRecord.is_active,
+            staff_type: facultyRecord.staff_type,
           }
         : null,
 
       examinerProfile: isExaminerUser
         ? {
-            id: examinerResult.data.id,
-            name: examinerResult.data.name,
+            id: examinerRecord.id,
+            name: examinerRecord.name,
           }
         : null,
     };
   } catch (err) {
-    console.error("Role check error:", err);
+    console.error("Role/capability check error:", err);
 
     if (err.statusCode) {
       throw err;

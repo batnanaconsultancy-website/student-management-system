@@ -2,25 +2,31 @@ import { defineNuxtRouteMiddleware, navigateTo } from "nuxt/app";
 
 // Gates /examiner/* routes.
 //
-// Examiner is an independent capability.
-// A user can therefore be:
-//   admin + examiner
-//   faculty + examiner
-//   examiner-only (temporary legacy support)
+// Examiner is a capability available to teaching Faculty members.
+// A user may therefore have multiple dashboards:
 //
-// Ordinary Faculty members are NOT examiners and cannot enter
-// examiner routes.
+//   Admin + Faculty + Examiner
+//   Admin + Faculty
+//   Faculty + Examiner
+//   Faculty only
+//
+// The user must actively select "Examiner" before entering
+// /examiner/* routes.
+
 export default defineNuxtRouteMiddleware(async () => {
   const { role, isExaminer, getUser } = useAuth();
 
-  // Ensure we have the latest user, faculty and examiner data.
+  // Refresh the user's capabilities.
   await getUser();
 
-  if (isExaminer.value) {
+  // Examiner routes require BOTH:
+  // 1. An active Examiner capability
+  // 2. Examiner selected as the active dashboard
+  if (isExaminer.value && role.value === "examiner") {
     return;
   }
 
-  // Send the user back to the appropriate area.
+  // Otherwise return the user to the dashboard they currently selected.
   if (role.value === "admin") {
     return navigateTo("/admin/dashboard");
   }
