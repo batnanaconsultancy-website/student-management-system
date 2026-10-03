@@ -60,6 +60,7 @@ export default defineNuxtConfig({
     // `x-mentor-secret` header for /api/mentor/* server-to-server calls.
     // Must match MENTOR_API_SECRET in the AI Mentor app's env.
     mentorApiSecret: process.env.MENTOR_API_SECRET,
+    deploymentCommit: process.env.NUXT_DEPLOYMENT_COMMIT || "unknown",
     // Keys within public are also exposed client-side.
     // googleClientSecret intentionally does NOT live here -- it used to,
     // which meant Nuxt baked the Google OAuth client secret into the
