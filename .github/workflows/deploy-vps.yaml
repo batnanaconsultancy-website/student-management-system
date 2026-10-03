@@ -56,17 +56,34 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
+          echo "== Deployed commit =="
+          git rev-parse --short HEAD
+          git log -1 --oneline
+
+          echo "== Cleaning Nuxt generated files =="
+          rm -rf .output
+          rm -rf .nuxt
+          rm -rf node_modules/.cache/nuxt
+
           echo "== Installing dependencies =="
           npm install
 
           echo "== Building Nuxt application =="
           npm run build
 
+          echo "== Verifying production build =="
+          test -f .output/server/index.mjs
+
+          echo "Build output:"
+          ls -lh .output/server/index.mjs
+
           echo "== Restarting application =="
           pm2 restart student-management-system --update-env
 
-          echo "== Deployment complete =="
+          echo "== Checking application status =="
           pm2 status student-management-system
+
+          echo "== Deployment complete =="
           REMOTE_SCRIPT
             then
               echo ""
