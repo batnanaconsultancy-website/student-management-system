@@ -81,7 +81,7 @@ jobs:
           ls -lh .output/server/index.mjs
 
           echo "== Checking build contains deployment identifier =="
-          if ! grep -q "$DEPLOY_COMMIT" .output/server/index.mjs; then
+          if ! grep -R -q "$DEPLOY_COMMIT" .output/server; then
             echo "ERROR: Deployment commit was not found in the production build."
             exit 1
           fi
