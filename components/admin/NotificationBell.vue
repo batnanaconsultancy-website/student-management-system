@@ -8,7 +8,6 @@
 // - status_change -> Student profile
 // - final_project_assignment -> Final Project Assessment
 // - pipeline_failure -> no destination yet
-console.log("NotificationBell mounted script loaded");
 const { notifications, unreadCount, loading, fetchNotifications, markAsRead } =
   useAdminNotifications();
 
