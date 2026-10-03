@@ -29,6 +29,7 @@ const loading = computed(() => status.value === "pending")
 const search = ref("")
 const selectedType = ref("All")
 const selectedStatus = ref("All")
+const removingExaminer = ref<string | null>(null)
 
 const typeOptions = [
   { label: "All types", value: "All" },
@@ -75,12 +76,51 @@ const columns = [
   { accessorKey: "is_faculty", header: "Faculty" },
   { accessorKey: "is_examiner", header: "Examiner" },
   { accessorKey: "is_active", header: "Status" },
+  { accessorKey: "actions", header: "Actions" },
 ]
 
 function formatStaffType(value: string | null) {
   if (value === "teaching") return "Teaching"
   if (value === "non_teaching") return "Non-teaching"
   return "—"
+}
+
+async function removeExaminer(row: UserRow) {
+  if (!row.examiner_id || !row.is_examiner) {
+    return
+  }
+
+  const confirmed = window.confirm(
+    `Remove ${row.name || row.email} as an Examiner?\n\nThey will remain a Faculty member.`,
+  )
+
+  if (!confirmed) {
+    return
+  }
+
+  removingExaminer.value = row.email
+
+  try {
+    await $fetch("/api/admin/final-project-assessment/examiner-entry", {
+      method: "POST",
+      body: {
+        id: row.examiner_id,
+        email: row.email,
+        name: row.name || row.email,
+        isActive: false,
+      },
+    })
+
+    await refresh()
+  } catch (error: any) {
+    window.alert(
+      error?.data?.statusMessage ||
+        error?.statusMessage ||
+        "Unable to remove the Examiner.",
+    )
+  } finally {
+    removingExaminer.value = null
+  }
 }
 </script>
 
@@ -203,6 +243,25 @@ function formatStaffType(value: string | null) {
             >
               {{ row.original.is_active ? "Active" : "Inactive" }}
             </UBadge>
+          </template>
+
+          <template #actions-cell="{ row }">
+            <UButton
+              v-if="row.original.is_examiner"
+              icon="i-lucide-user-minus"
+              color="error"
+              variant="soft"
+              size="sm"
+              :loading="removingExaminer === row.original.email"
+              :disabled="removingExaminer !== null"
+              @click="removeExaminer(row.original)"
+            >
+              Remove Examiner
+            </UButton>
+
+            <span v-else class="text-muted text-sm">
+              —
+            </span>
           </template>
         </UTable>
       </div>
