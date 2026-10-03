@@ -11,6 +11,10 @@ const links = [[ {
   icon: 'i-pajamas:users',
   to: '/admin/managment/students'
 }, {
+  label: 'Users',
+  icon: 'i-lucide-user-round-search',
+  to: '/admin/managment/users'
+}, {
   label: 'Seasons',
   icon: 'i-pajamas:issue-type-objective',
   to: '/admin/managment/seasons'
