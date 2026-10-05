@@ -248,7 +248,37 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  if (ownAssessment?.status === 'SUBMITTED') {
+  /*
+   * Check whether the current examiner has an approved re-grading
+   * request for this submitted assessment.
+   */
+  const { data: regradingRequest, error: regradingRequestError } =
+    await supabase
+      .from('final_project_regrading_requests')
+      .select('id, request_number, status')
+      .eq('submission_id', submissionId)
+      .eq('examiner_id', examiner.id)
+      .order('request_number', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+  if (regradingRequestError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: regradingRequestError.message,
+    })
+  }
+
+  const regradingApproved = regradingRequest?.status === 'APPROVED'
+
+  /*
+   * A submitted examiner assessment can only be resubmitted
+   * through an approved re-grading request.
+   */
+  if (
+    ownAssessment?.status === 'SUBMITTED' &&
+    !regradingApproved
+  ) {
     throw createError({
       statusCode: 403,
       statusMessage:
@@ -263,7 +293,19 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  if (!['ASSIGNED', 'ACTIVATED', 'IN_PROGRESS'].includes(submission.status)) {
+  const normalSubmissionStatusAllowed = [
+    'ASSIGNED',
+    'ACTIVATED',
+    'IN_PROGRESS',
+  ].includes(submission.status)
+
+  const regradingSubmissionStatusAllowed =
+    regradingApproved && submission.status === 'SUBMITTED'
+
+  if (
+    !normalSubmissionStatusAllowed &&
+    !regradingSubmissionStatusAllowed
+  ) {
     throw createError({
       statusCode: 400,
       statusMessage:
@@ -505,6 +547,20 @@ export default defineEventHandler(async (event) => {
     submittedByExaminer.size === assignedExaminerIds.length
 
   /*
+   * A re-grading submission must not reopen the shared assessment.
+   * The original submission was already complete, so all assigned
+   * examiner assessments should still be submitted after this
+   * examiner's revised assessment is saved.
+   */
+  if (regradingApproved && !allExaminersSubmitted) {
+    throw createError({
+      statusCode: 500,
+      statusMessage:
+        'Re-grading could not be completed because not all assigned examiner assessments are submitted.',
+    })
+  }
+
+  /*
    * Not everyone has submitted yet.
    */
   if (!allExaminersSubmitted) {
@@ -605,6 +661,76 @@ export default defineEventHandler(async (event) => {
       statusCode: 500,
       statusMessage: submissionError.message,
     })
+  }
+
+  /*
+   * Complete the approved re-grading request and preserve the
+   * revised assessment values in the re-grading history.
+   */
+  if (regradingApproved && regradingRequest) {
+    const revisedGrades = Object.fromEntries(
+      criterionIds.map((criterionId) => [
+        criterionId,
+        Number(grades[criterionId]),
+      ]),
+    )
+    const { data: history, error: historyError } = await adminClient
+      .from('final_project_regrading_history')
+      .select('id')
+      .eq('regrading_request_id', regradingRequest.id)
+      .maybeSingle()
+
+    if (historyError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: historyError.message,
+      })
+    }
+
+    if (!history) {
+      throw createError({
+        statusCode: 500,
+        statusMessage:
+          'The approved re-grading history record could not be found.',
+      })
+    }
+
+    const { error: historyUpdateError } = await adminClient
+      .from('final_project_regrading_history')
+      .update({
+        revised_grades: revisedGrades,
+        revised_average_grade: examinerAverage,
+        revised_letter_grade: examinerLetterGrade,
+        revised_decision: examinerDecision,
+        revised_feedback: feedback,
+        revised_recommendations: recommendations,
+        completed_at: submittedAt,
+      })
+      .eq('id', history.id)
+
+    if (historyUpdateError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: historyUpdateError.message,
+      })
+    }
+
+    const { error: regradingCompleteError } = await adminClient
+      .from('final_project_regrading_requests')
+      .update({
+        status: 'COMPLETED',
+        completed_at: submittedAt,
+        updated_at: submittedAt,
+      })
+      .eq('id', regradingRequest.id)
+      .eq('status', 'APPROVED')
+
+    if (regradingCompleteError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: regradingCompleteError.message,
+      })
+    }
   }
 
   /*
