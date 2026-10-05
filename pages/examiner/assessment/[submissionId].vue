@@ -37,6 +37,9 @@ const recommendations = ref('')
 const saving = ref(false)
 const submitting = ref(false)
 
+const regradingReason = ref('')
+const requestingRegrading = ref(false)
+
 
 // -----------------------------------------------------------------------------
 // Helpers
@@ -524,6 +527,89 @@ async function handleSubmit() {
     )
   } finally {
     submitting.value = false
+  }
+}
+
+
+// -----------------------------------------------------------------------------
+// Request re-grading
+// -----------------------------------------------------------------------------
+
+async function handleRequestRegrading() {
+  if (!isSubmission.value) return
+
+  const reason = regradingReason.value.trim()
+
+  if (!reason) {
+    showError(
+      'Reason required',
+      'Please explain why you are requesting permission to re-grade this assessment.',
+    )
+    return
+  }
+
+  if (reason.length > 2000) {
+    showError(
+      'Reason too long',
+      'The re-grading reason must be 2000 characters or fewer.',
+    )
+    return
+  }
+
+  if (data.value?.regrading?.approved === true) {
+    showError(
+      'Re-grading already approved',
+      'You already have permission to re-grade this assessment.',
+    )
+    return
+  }
+
+  if (data.value?.regrading?.request?.status === 'PENDING') {
+    showError(
+      'Request already pending',
+      'Your re-grading request is already waiting for administrator review.',
+    )
+    return
+  }
+
+  if (
+    !confirm(
+      'Submit this re-grading request to the administrator?'
+    )
+  ) {
+    return
+  }
+
+  requestingRegrading.value = true
+
+  try {
+    await $fetch(
+      `/api/examiner/assessment/${submissionId.value}/request-regrading`,
+      {
+        method: 'POST',
+        body: {
+          reason,
+        },
+      },
+    )
+
+    showSuccess(
+      'Re-grading requested',
+      'Your request has been sent to the administrator for review.',
+    )
+
+    regradingReason.value = ''
+
+    await fetchAssessment()
+  } catch (err: any) {
+    showError(
+      'Failed to request re-grading',
+      err?.data?.statusMessage ||
+        err?.message ||
+        'Please try again.',
+    )
+  } finally {
+    requestingRegrading.value = false
   }
 }
 </script>
@@ -1269,15 +1355,87 @@ async function handleSubmit() {
             </UButton>
           </div>
 
-          <!-- Submitted notice -->
-          <UAlert
+          <!-- Submitted / re-grading state -->
+          <div
             v-else-if="currentExaminerStatus === 'SUBMITTED'"
-            color="success"
-            variant="subtle"
-            icon="i-lucide-lock"
-            title="Your assessment has been submitted"
-            description="Your grades and assessment are now read-only. Any correction after submission will use the re-grading process."
-          />
+            class="space-y-4"
+          >
+            <!-- Approved re-grading -->
+            <UAlert
+              v-if="data?.regrading?.approved === true"
+              color="warning"
+              variant="subtle"
+              icon="i-lucide-unlock"
+              title="Re-grading approved"
+              description="An administrator has approved your re-grading request. You may now edit your assessment and submit the revised grades."
+            />
+
+            <!-- Pending request -->
+            <template v-else-if="data?.regrading?.request?.status === 'PENDING'">
+              <UAlert
+                color="warning"
+                variant="subtle"
+                icon="i-lucide-clock"
+                title="Your assessment has been submitted"
+                :description="
+                  `Your re-grading request #${data.regrading.request.requestNumber} is waiting for administrator review. Your grades remain read-only until the request is approved.`
+                "
+              />
+            </template>
+
+            <!-- Submitted with no pending approval -->
+            <template v-else>
+              <UAlert
+                color="success"
+                variant="subtle"
+                icon="i-lucide-lock"
+                title="Your assessment has been submitted"
+                description="Your grades and assessment are now read-only. If you need to correct your assessment, you must request administrator permission to re-grade it."
+              />
+
+              <UCard>
+                <template #header>
+                  <div class="space-y-1">
+                    <p class="font-medium text-highlighted">
+                      Request Re-grading
+                    </p>
+
+                    <p class="text-sm text-muted">
+                      Explain why you need to make changes to your submitted
+                      assessment. The administrator will review your request
+                      before editing is enabled.
+                    </p>
+                  </div>
+                </template>
+
+                <div class="space-y-3">
+                  <UTextarea
+                    v-model="regradingReason"
+                    :rows="5"
+                    :maxlength="2000"
+                    placeholder="Explain the reason for requesting re-grading..."
+                    :disabled="requestingRegrading"
+                  />
+
+                  <div class="flex justify-between items-center gap-3">
+                    <span class="text-xs text-muted">
+                      {{ regradingReason.length }}/2000 characters
+                    </span>
+
+                    <UButton
+                      color="warning"
+                      icon="i-lucide-send"
+                      :loading="requestingRegrading"
+                      :disabled="!regradingReason.trim()"
+                      @click="handleRequestRegrading"
+                    >
+                      Request Re-grading
+                    </UButton>
+                  </div>
+                </div>
+              </UCard>
+            </template>
+          </div>
 
         </template>
 
