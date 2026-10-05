@@ -37,7 +37,8 @@ export const useAuth = () => {
    * This is a UI/navigation state.
    * Backend authorization remains based on the actual database records.
    */
-  const activeRole = useState<Role>("activeRole", () => "guest");
+  const savedRole = useCookie<Role | null>("active-dashboard-role", { default: () => null });
+  const activeRole = useState<Role>("activeRole", () => savedRole.value || "guest");
 
   /*
    * Backwards-compatible alias.
@@ -77,6 +78,7 @@ export const useAuth = () => {
   const setActiveRole = (newRole: Role) => {
     if (availableRoles.value.includes(newRole)) {
       activeRole.value = newRole;
+      savedRole.value = newRole;
     }
   };
 
@@ -200,6 +202,7 @@ export const useAuth = () => {
      */
     if (!availableRoles.value.includes(activeRole.value)) {
       activeRole.value = availableRoles.value[0];
+      savedRole.value = activeRole.value;
     }
 
     return data.user;
