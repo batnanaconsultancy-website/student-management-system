@@ -265,7 +265,13 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const criteria = criteriaResult.data || []
+  const criteria = (criteriaResult.data || []).map((criterion) => ({
+    id: criterion.id,
+    label: criterion.label,
+    maxGrade: criterion.max_grade,
+    displayOrder: criterion.display_order,
+    description: criterion.description,
+  }))
   const assignedExaminers = (examinersResult.data || [])
     .map((row) => ({
       id: row.examiners?.id || row.examiner_id,
