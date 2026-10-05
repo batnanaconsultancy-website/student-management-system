@@ -1,30 +1,54 @@
 <script setup lang="ts">
-type Role = "admin" | "faculty" | "examiner" | "user";
+type Role = "admin" | "faculty" | "examiner" | "user" | "guest";
 
 const { activeRole, availableRoles, setActiveRole } = useAuth();
 
 const router = useRouter();
 
-const roleLabels: Record<Role, string> = {
-  admin: "Admin",
-  faculty: "Faculty",
-  examiner: "Examiner",
-  user: "Student",
-};
+function getRoleLabel(role: Role): string {
+  switch (role) {
+    case "admin":
+      return "Admin";
+    case "faculty":
+      return "Faculty";
+    case "examiner":
+      return "Examiner";
+    case "user":
+      return "Student";
+    case "guest":
+      return "Guest";
+  }
+}
 
-const roleIcons: Record<Role, string> = {
-  admin: "i-lucide-shield-check",
-  faculty: "i-lucide-users",
-  examiner: "i-lucide-clipboard-check",
-  user: "i-lucide-graduation-cap",
-};
+function getRoleIcon(role: Role): string {
+  switch (role) {
+    case "admin":
+      return "i-lucide-shield-check";
+    case "faculty":
+      return "i-lucide-users";
+    case "examiner":
+      return "i-lucide-clipboard-check";
+    case "user":
+      return "i-lucide-graduation-cap";
+    case "guest":
+      return "i-lucide-user";
+  }
+}
 
-const roleDestinations: Record<Role, string> = {
-  admin: "/admin/dashboard",
-  faculty: "/faculty/dashboard",
-  examiner: "/examiner/dashboard",
-  user: "/students/dashboard",
-};
+function getRoleDestination(role: Role): string {
+  switch (role) {
+    case "admin":
+      return "/admin/dashboard";
+    case "faculty":
+      return "/faculty/dashboard";
+    case "examiner":
+      return "/examiner/dashboard";
+    case "user":
+      return "/students/dashboard";
+    case "guest":
+      return "/";
+  }
+}
 
 const showSwitcher = computed(() => availableRoles.value.length > 1);
 
@@ -37,7 +61,7 @@ async function handleRoleChange(value: string) {
 
   setActiveRole(selectedRole);
 
-  const destination = roleDestinations[selectedRole];
+  const destination = getRoleDestination(selectedRole);
 
   if (destination) {
     await router.push(destination);
@@ -55,9 +79,9 @@ async function handleRoleChange(value: string) {
       :model-value="activeRole"
       :items="
         availableRoles.map((role) => ({
-          label: roleLabels[role],
+          label: getRoleLabel(role),
           value: role,
-          icon: roleIcons[role],
+          icon: getRoleIcon(role),
         }))
       "
       value-key="value"

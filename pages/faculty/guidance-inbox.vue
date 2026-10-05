@@ -1,12 +1,23 @@
 <script setup lang="ts">
+interface GuidanceRequest {
+  id: string;
+  categories: string[] | null;
+  created_at: string;
+  status: string;
+  message: string;
+}
+
+interface GuidanceRequestsResponse {
+  data: GuidanceRequest[];
+}
+
 definePageMeta({
-  layout: "faculty",
-  middleware: ["faculty"],
+  layout: "faculty" as any,
+  middleware: ["faculty"] as any,
 });
 
-const { data, pending, error, refresh } = await useFetch(
-  "/api/faculty/guidance-requests",
-);
+const { data, pending, error, refresh } =
+  await useFetch<GuidanceRequestsResponse>("/api/faculty/guidance-requests");
 
 const requests = computed(() => data.value?.data || []);
 
@@ -17,6 +28,7 @@ const updatingId = ref<string | null>(null);
 const statusColor = (status: string) => {
   if (status === "Resolved") return "success";
   if (status === "In Progress") return "warning";
+
   return "primary";
 };
 

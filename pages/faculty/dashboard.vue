@@ -1,7 +1,7 @@
 <script setup lang="ts">
 definePageMeta({
-  layout: "faculty",
-  middleware: ["faculty"],
+  layout: "faculty" as any,
+  middleware: ["faculty"] as any,
 });
 
 const { facultyProfile, isExaminer } = useAuth();
@@ -28,7 +28,7 @@ const { facultyProfile, isExaminer } = useAuth();
         <div>
           <h2 class="text-lg font-semibold">Overview</h2>
 
-          <p class="text-sm text-muted mt-1">
+          <p class="mt-1 text-sm text-muted">
             Access attendance, analytics, guidance requests, and assigned
             examiner work.
           </p>
@@ -40,7 +40,7 @@ const { facultyProfile, isExaminer } = useAuth();
               <div class="flex items-center gap-2">
                 <UIcon name="i-lucide-clipboard-check" class="size-5" />
 
-                <span class="font-medium"> Attendance </span>
+                <span class="font-medium">Attendance</span>
               </div>
             </template>
 
@@ -60,7 +60,7 @@ const { facultyProfile, isExaminer } = useAuth();
               <div class="flex items-center gap-2">
                 <UIcon name="i-pajamas:chart" class="size-5" />
 
-                <span class="font-medium"> Analytics </span>
+                <span class="font-medium">Analytics</span>
               </div>
             </template>
 
@@ -80,7 +80,7 @@ const { facultyProfile, isExaminer } = useAuth();
               <div class="flex items-center gap-2">
                 <UIcon name="i-lucide-life-buoy" class="size-5" />
 
-                <span class="font-medium"> Guidance Inbox </span>
+                <span class="font-medium">Guidance Inbox</span>
               </div>
             </template>
 
@@ -100,7 +100,7 @@ const { facultyProfile, isExaminer } = useAuth();
               <div class="flex items-center gap-2">
                 <UIcon name="i-lucide-clipboard-list" class="size-5" />
 
-                <span class="font-medium"> Examiner </span>
+                <span class="font-medium">Examiner</span>
               </div>
             </template>
 

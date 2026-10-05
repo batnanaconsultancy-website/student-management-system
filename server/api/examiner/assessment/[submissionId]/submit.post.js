@@ -3,137 +3,639 @@ import { createError, readBody } from 'h3'
 import { requireExaminerForSubmission } from '~/server/utils/finalProjectAuth'
 import { notifyAllAdmins } from '~/server/utils/finalProjectAssessment'
 
-// POST /api/examiner/assessment/:submissionId/submit
-//
-// Section 11/14: SUBMIT FINAL PROJECT SUBMISSION / PRESENTATION.
-// Validates everything the spec requires, computes the average grade
-// (never trusts a client-supplied average), locks the submission
-// read-only, and fans out an Admin Inbox notification to every admin.
-//
-// Because Admin and Student both read directly from
-// final_project_submissions / final_project_grades (no separate
-// Admin-side or Student-side copy of this data), their checkmarks
-// update "automatically" the instant this transaction commits --
-// there's nothing else to sync.
-//
-// Body: { grades: { [criterionId]: number }, signatureText: string }
+function round2(value) {
+  return Math.round(Number(value) * 100) / 100
+}
+
+function letterGrade(value) {
+  const grade = Number(value)
+
+  if (grade >= 88) return 'E'
+  if (grade >= 74) return 'G'
+  if (grade >= 60) return 'S'
+  if (grade >= 53) return 'F'
+  return 'P'
+}
+
+function decisionForGrade(value) {
+  return Number(value) >= 60 ? 'PASS' : 'FAIL'
+}
+
 export default defineEventHandler(async (event) => {
   const supabase = await serverSupabaseClient(event)
-  const serviceSupabase = serverSupabaseServiceRole(event)
   const submissionId = getRouterParam(event, 'submissionId')
-  const { user, examiner, submission, assignment } = await requireExaminerForSubmission(event, supabase, submissionId)
 
-  const isReadOnly =
-    submission.status === 'SUBMITTED' &&
-    !(submission.reopened_at && new Date(submission.reopened_at) > new Date(submission.submitted_at))
-  if (isReadOnly) {
-    throw createError({ statusCode: 403, statusMessage: 'This assessment has already been submitted.' })
-  }
-  if (!assignment.assessment_activated) {
-    throw createError({ statusCode: 403, statusMessage: 'This assessment has not been activated by the admin.' })
-  }
+  const { examiner, submission, assignment } =
+    await requireExaminerForSubmission(event, supabase, submissionId)
 
   const body = await readBody(event)
-  const submittedGrades = body?.grades || {}
-  const signatureText = body?.signatureText ? String(body.signatureText).trim() : ''
 
-  if (!signatureText) {
-    throw createError({ statusCode: 400, statusMessage: 'A signature is required before submitting.' })
+  const grades = body?.grades && typeof body.grades === 'object'
+    ? body.grades
+    : {}
+
+  const signatureText = body?.signatureText
+    ? String(body.signatureText).trim()
+    : ''
+
+  const feedback =
+    body?.feedback !== undefined && body?.feedback !== null
+      ? String(body.feedback).trim()
+      : ''
+
+  const recommendations =
+    body?.recommendations !== undefined &&
+    body?.recommendations !== null
+      ? String(body.recommendations).trim()
+      : ''
+
+  /*
+   * ------------------------------------------------------------
+   * PRESENTATION
+   * ------------------------------------------------------------
+   * Preserve the existing single-examiner behaviour for now.
+   */
+  if (submission.assessment_type === 'presentation') {
+    const isReadOnly =
+      submission.status === 'SUBMITTED' &&
+      !(
+        submission.reopened_at &&
+        submission.submitted_at &&
+        new Date(submission.reopened_at) > new Date(submission.submitted_at)
+      )
+
+    if (isReadOnly) {
+      throw createError({
+        statusCode: 403,
+        statusMessage:
+          'This assessment has already been submitted and is read-only.',
+      })
+    }
+
+    if (!signatureText) {
+      throw createError({
+        statusCode: 400,
+        statusMessage:
+          'Signature required. Type your full name before submitting.',
+      })
+    }
+
+    const { data: criteria, error: criteriaError } = await supabase
+      .from('final_project_criteria')
+      .select('id, max_grade')
+      .eq('assessment_type', 'presentation')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true })
+
+    if (criteriaError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: criteriaError.message,
+      })
+    }
+
+    const validCriteria = new Map(
+      (criteria || []).map((criterion) => [
+        criterion.id,
+        Number(criterion.max_grade ?? 100),
+      ]),
+    )
+
+    const criterionIds = [...validCriteria.keys()]
+
+    for (const criterionId of criterionIds) {
+      const value = grades[criterionId]
+
+      if (value === undefined || value === null || value === '') {
+        throw createError({
+          statusCode: 400,
+          statusMessage:
+            'Every assessment criterion must have a grade before submission.',
+        })
+      }
+
+      const numericGrade = Number(value)
+
+      if (
+        !Number.isFinite(numericGrade) ||
+        numericGrade < 0 ||
+        numericGrade > validCriteria.get(criterionId)
+      ) {
+        throw createError({
+          statusCode: 400,
+          statusMessage: `Invalid grade for criterion ${criterionId}.`,
+        })
+      }
+    }
+
+    for (const [criterionId, grade] of Object.entries(grades)) {
+      if (!validCriteria.has(criterionId)) {
+        throw createError({
+          statusCode: 400,
+          statusMessage: `Invalid criterion: ${criterionId}`,
+        })
+      }
+
+      const { error } = await supabase
+        .from('final_project_grades')
+        .upsert(
+          {
+            submission_id: submissionId,
+            criterion_id: criterionId,
+            examiner_id: examiner.id,
+            grade: Number(grade),
+          },
+          {
+            onConflict: 'submission_id,criterion_id,examiner_id',
+          },
+        )
+
+      if (error) {
+        throw createError({
+          statusCode: 500,
+          statusMessage: error.message,
+        })
+      }
+    }
+
+    const average = round2(
+      criterionIds.reduce(
+        (sum, criterionId) => sum + Number(grades[criterionId]),
+        0,
+      ) / criterionIds.length,
+    )
+
+    const { error: signatureError } = await supabase
+      .from('final_project_signatures')
+      .upsert(
+        {
+          submission_id: submissionId,
+          examiner_id: examiner.id,
+          signature_text: signatureText,
+          signed_at: new Date().toISOString(),
+        },
+        {
+          onConflict: 'submission_id,examiner_id',
+        },
+      )
+
+    if (signatureError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: signatureError.message,
+      })
+    }
+
+    const { error: submissionError } = await supabase
+      .from('final_project_submissions')
+      .update({
+        status: 'SUBMITTED',
+        average_grade: average,
+        submitted_by: examiner.id,
+        submitted_at: new Date().toISOString(),
+      })
+      .eq('id', submissionId)
+
+    if (submissionError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: submissionError.message,
+      })
+    }
+
+    return {
+      data: {
+        submitted: true,
+        examinerAverage: average,
+        letterGrade: letterGrade(average),
+        decision: decisionForGrade(average),
+        allExaminersSubmitted: true,
+        overallAverage: average,
+      },
+    }
   }
 
-  // ── Validate against the real criteria list (not whatever the
-  // client happened to send) -- every active criterion for this
-  // assessment type must have a grade, within range.
+  /*
+   * ------------------------------------------------------------
+   * SUBMISSION — NEW MULTI-EXAMINER MODEL
+   * ------------------------------------------------------------
+   */
+
+  /*
+   * Read the current examiner's assessment through normal RLS.
+   */
+  const { data: ownAssessment, error: ownAssessmentError } =
+    await supabase
+      .from('final_project_examiner_assessments')
+      .select(`
+        id,
+        status,
+        average_grade,
+        letter_grade,
+        decision,
+        feedback,
+        recommendations,
+        submitted_at
+      `)
+      .eq('submission_id', submissionId)
+      .eq('examiner_id', examiner.id)
+      .maybeSingle()
+
+  if (ownAssessmentError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: ownAssessmentError.message,
+    })
+  }
+
+  if (ownAssessment?.status === 'SUBMITTED') {
+    throw createError({
+      statusCode: 403,
+      statusMessage:
+        'Your assessment has already been submitted. Request admin permission to re-grade it before submitting changes.',
+    })
+  }
+
+  if (submission.status === 'ARCHIVED') {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'This assessment has been archived.',
+    })
+  }
+
+  if (!['ASSIGNED', 'ACTIVATED', 'IN_PROGRESS'].includes(submission.status)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage:
+        'This assessment is not currently available for submission.',
+    })
+  }
+
+  /*
+   * Load the active Submission criteria.
+   */
   const { data: criteria, error: criteriaError } = await supabase
     .from('final_project_criteria')
-    .select('id, label, max_grade')
-    .eq('assessment_type', submission.assessment_type)
+    .select('id, label, max_grade, display_order')
+    .eq('assessment_type', 'submission')
     .eq('is_active', true)
+    .order('display_order', { ascending: true })
 
-  if (criteriaError) throw createError({ statusCode: 500, statusMessage: criteriaError.message })
-  if (!criteria || criteria.length === 0) {
-    throw createError({ statusCode: 400, statusMessage: 'No grading criteria are configured for this assessment type.' })
+  if (criteriaError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: criteriaError.message,
+    })
   }
 
-  const resolvedGrades = []
+  if (!criteria?.length) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: 'No active Submission assessment criteria were found.',
+    })
+  }
+
+  const validCriteria = new Map(
+    criteria.map((criterion) => [
+      criterion.id,
+      Number(criterion.max_grade ?? 100),
+    ]),
+  )
+
+  /*
+   * Every active criterion is required.
+   */
   for (const criterion of criteria) {
-    const raw = submittedGrades[criterion.id]
-    const grade = Number(raw)
-    if (raw === undefined || raw === null || raw === '' || Number.isNaN(grade)) {
-      throw createError({ statusCode: 400, statusMessage: `A grade is required for "${criterion.label}".` })
+    const value = grades[criterion.id]
+
+    if (value === undefined || value === null || value === '') {
+      throw createError({
+        statusCode: 400,
+        statusMessage:
+          `Every assessment criterion must have a grade before submission. Missing: ${criterion.label}.`,
+      })
     }
-    if (grade < 0 || grade > criterion.max_grade) {
-      throw createError({ statusCode: 400, statusMessage: `"${criterion.label}" must be between 0 and ${criterion.max_grade}.` })
+
+    const numericGrade = Number(value)
+
+    if (
+      !Number.isFinite(numericGrade) ||
+      numericGrade < 0 ||
+      numericGrade > validCriteria.get(criterion.id)
+    ) {
+      throw createError({
+        statusCode: 400,
+        statusMessage:
+          `Invalid grade for criterion: ${criterion.label}.`,
+      })
     }
-    resolvedGrades.push({ criterionId: criterion.id, grade })
   }
 
-  // Average Grade = sum of entered grades / number of criteria.
-  // Matches the spec's formula exactly -- NOT a weighted average
-  // against each criterion's own max, a plain mean of the entered
-  // numbers, same as the worked example in the spec (100+76+80+23 = 69.75).
-  const averageGrade =
-    Math.round((resolvedGrades.reduce((sum, g) => sum + g.grade, 0) / resolvedGrades.length) * 100) / 100
+  /*
+   * Reject unknown criterion IDs.
+   */
+  for (const criterionId of Object.keys(grades)) {
+    if (!validCriteria.has(criterionId)) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: `Invalid criterion: ${criterionId}`,
+      })
+    }
+  }
 
-  // ── Write grades
-  for (const g of resolvedGrades) {
+  if (!signatureText) {
+    throw createError({
+      statusCode: 400,
+      statusMessage:
+        'Signature required. Type your full name before submitting.',
+    })
+  }
+
+  /*
+   * Calculate this examiner's average.
+   */
+  const examinerAverage = round2(
+    criteria.reduce(
+      (sum, criterion) => sum + Number(grades[criterion.id]),
+      0,
+    ) / criteria.length,
+  )
+
+  const examinerLetterGrade = letterGrade(examinerAverage)
+  const examinerDecision = decisionForGrade(examinerAverage)
+
+  /*
+   * Save this examiner's grades.
+   */
+  for (const criterion of criteria) {
     const { error } = await supabase
       .from('final_project_grades')
-      .upsert({ submission_id: submissionId, criterion_id: g.criterionId, grade: g.grade }, { onConflict: 'submission_id,criterion_id' })
-    if (error) throw createError({ statusCode: 500, statusMessage: error.message })
+      .upsert(
+        {
+          submission_id: submissionId,
+          criterion_id: criterion.id,
+          examiner_id: examiner.id,
+          grade: Number(grades[criterion.id]),
+        },
+        {
+          onConflict: 'submission_id,criterion_id,examiner_id',
+        },
+      )
+
+    if (error) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: error.message,
+      })
+    }
   }
 
-  // ── Write this examiner's signature
-  const nowIso = new Date().toISOString()
-  const { error: sigError } = await supabase
+  /*
+   * Save the examiner's signature.
+   */
+  const { error: signatureError } = await supabase
     .from('final_project_signatures')
     .upsert(
-      { submission_id: submissionId, examiner_id: examiner.id, signature_text: signatureText, signed_at: nowIso },
-      { onConflict: 'submission_id,examiner_id' }
+      {
+        submission_id: submissionId,
+        examiner_id: examiner.id,
+        signature_text: signatureText,
+        signed_at: new Date().toISOString(),
+      },
+      {
+        onConflict: 'submission_id,examiner_id',
+      },
     )
-  if (sigError) throw createError({ statusCode: 500, statusMessage: sigError.message })
 
-  // ── Lock the submission
-  const { data: updatedSubmission, error: updateError } = await supabase
+  if (signatureError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: signatureError.message,
+    })
+  }
+
+  /*
+   * Mark this examiner's assessment SUBMITTED.
+   */
+  const { error: assessmentError } = await supabase
+    .from('final_project_examiner_assessments')
+    .upsert(
+      {
+        submission_id: submissionId,
+        examiner_id: examiner.id,
+        status: 'SUBMITTED',
+        average_grade: examinerAverage,
+        letter_grade: examinerLetterGrade,
+        decision: examinerDecision,
+        feedback,
+        recommendations,
+        submitted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: 'submission_id,examiner_id',
+      },
+    )
+
+  if (assessmentError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: assessmentError.message,
+    })
+  }
+
+  /*
+   * From this point onward, use the service-role client for the
+   * shared completion check. RLS intentionally prevents an examiner
+   * from reading other examiners' private assessment rows.
+   */
+  const adminClient = await serverSupabaseServiceRole(event)
+
+  const { data: assignedRows, error: assignedError } =
+    await adminClient
+      .from('final_project_assignment_examiners')
+      .select('examiner_id, examiners ( id, name, email )')
+      .eq('assignment_id', assignment.id)
+
+  if (assignedError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: assignedError.message,
+    })
+  }
+
+  const assignedExaminerIds = (assignedRows || [])
+    .map((row) => row.examiner_id)
+    .filter(Boolean)
+
+  if (!assignedExaminerIds.length) {
+    throw createError({
+      statusCode: 500,
+      statusMessage:
+        'No examiners are assigned to this final project submission.',
+    })
+  }
+
+  const { data: submittedAssessments, error: submittedError } =
+    await adminClient
+      .from('final_project_examiner_assessments')
+      .select(
+        'examiner_id, status, average_grade, letter_grade, decision',
+      )
+      .eq('submission_id', submissionId)
+      .in('examiner_id', assignedExaminerIds)
+
+  if (submittedError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: submittedError.message,
+    })
+  }
+
+  const submittedByExaminer = new Map(
+    (submittedAssessments || [])
+      .filter((assessment) => assessment.status === 'SUBMITTED')
+      .map((assessment) => [
+        assessment.examiner_id,
+        assessment,
+      ]),
+  )
+
+  const allExaminersSubmitted =
+    submittedByExaminer.size === assignedExaminerIds.length
+
+  /*
+   * Not everyone has submitted yet.
+   */
+  if (!allExaminersSubmitted) {
+    const { error: progressError } = await adminClient
+      .from('final_project_submissions')
+      .update({
+        status: 'IN_PROGRESS',
+        average_grade: null,
+        submitted_by: null,
+        submitted_at: null,
+      })
+      .eq('id', submissionId)
+
+    if (progressError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: progressError.message,
+      })
+    }
+
+    await notifyAllAdmins(adminClient, {
+      type: 'final_project_examiner_assessment_submitted',
+      title: 'Final Project Submission assessment received',
+      body:
+        `${examiner.name} submitted their assessment for ` +
+        `${assignment.student?.name || 'the student'}. ` +
+        `${submittedByExaminer.size} of ${assignedExaminerIds.length} ` +
+        'assigned examiners have now submitted.',
+      entityType: 'final_project_submission',
+      entityId: submissionId,
+    })
+
+    return {
+      data: {
+        submitted: true,
+        examinerAverage,
+        letterGrade: examinerLetterGrade,
+        decision: examinerDecision,
+        allExaminersSubmitted: false,
+        submittedExaminerCount: submittedByExaminer.size,
+        totalExaminerCount: assignedExaminerIds.length,
+        overallAverage: null,
+        overallLetterGrade: null,
+        overallDecision: null,
+      },
+    }
+  }
+
+  /*
+   * ------------------------------------------------------------
+   * ALL EXAMINERS HAVE SUBMITTED
+   * ------------------------------------------------------------
+   *
+   * Overall average = mean of the examiner averages.
+   */
+  const examinerAverages = assignedExaminerIds.map((examinerId) => {
+    const assessment = submittedByExaminer.get(examinerId)
+
+    if (
+      !assessment ||
+      assessment.average_grade === null ||
+      assessment.average_grade === undefined
+    ) {
+      throw createError({
+        statusCode: 500,
+        statusMessage:
+          'One or more submitted examiner assessments has no average grade.',
+      })
+    }
+
+    return Number(assessment.average_grade)
+  })
+
+  const overallAverage = round2(
+    examinerAverages.reduce((sum, value) => sum + value, 0) /
+      examinerAverages.length,
+  )
+
+  const overallLetterGrade = letterGrade(overallAverage)
+  const overallDecision = decisionForGrade(overallAverage)
+  const submittedAt = new Date().toISOString()
+
+  /*
+   * The shared submission is now officially complete.
+   */
+  const { error: submissionError } = await adminClient
     .from('final_project_submissions')
     .update({
       status: 'SUBMITTED',
-      average_grade: averageGrade,
+      average_grade: overallAverage,
       submitted_by: examiner.id,
-      submitted_at: nowIso,
+      submitted_at: submittedAt,
     })
     .eq('id', submissionId)
-    .select()
-    .single()
-  if (updateError) throw createError({ statusCode: 500, statusMessage: updateError.message })
 
-  // ── Audit trail (Section 20)
-  await supabase.from('audit_log').insert({
-    admin_email: user.email, // actor, not necessarily an admin -- see column note in the Phase 1 changelog
-    action: 'final_project_assessment_submitted',
-    entity_type: 'final_project_submission',
-    entity_id: submissionId,
-    details: {
-      assessmentType: submission.assessment_type,
-      studentId: assignment.student_id,
-      examinerId: examiner.id,
-      averageGrade,
-    },
-  })
+  if (submissionError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: submissionError.message,
+    })
+  }
 
-  // ── Admin Inbox notification (Section 8)
-  const studentName = assignment.students
-    ? `${assignment.students.first_name || ''} ${assignment.students.last_name || ''}`.trim()
-    : 'Unknown student'
-  const assessmentLabel = submission.assessment_type === 'submission' ? 'Final Project Submission' : 'Final Project Presentation'
-
-  await notifyAllAdmins(serviceSupabase, {
+  /*
+   * Notify administrators only when the complete Submission
+   * assessment has been received from every assigned examiner.
+   */
+  await notifyAllAdmins(adminClient, {
     type: 'final_project_assessment_submitted',
-    title: 'New Final Project Assessment Submitted',
-    body: `Student: ${studentName}\nExaminer: ${examiner.name}\nAssessment: ${assessmentLabel}\nAverage Grade: ${averageGrade}`,
-    entityType: 'final_project_assignment',
-    entityId: assignment.id,
+    title: 'Final Project Submission assessment completed',
+    body:
+      `${assignment.student?.name || 'Student'} has received all ` +
+      `${assignedExaminerIds.length} examiner assessments. ` +
+      `Overall average: ${overallAverage}. ` +
+      `Grade: ${overallLetterGrade}. ` +
+      `Decision: ${overallDecision}.`,
+    entityType: 'final_project_submission',
+    entityId: submissionId,
   })
 
-  return { data: { submission: updatedSubmission, averageGrade } }
+  return {
+    data: {
+      submitted: true,
+      examinerAverage,
+      letterGrade: examinerLetterGrade,
+      decision: examinerDecision,
+      allExaminersSubmitted: true,
+      submittedExaminerCount: assignedExaminerIds.length,
+      totalExaminerCount: assignedExaminerIds.length,
+      overallAverage,
+      overallLetterGrade,
+      overallDecision,
+    },
+  }
 })

@@ -1,12 +1,43 @@
 <script setup lang="ts">
+interface AttendanceMetrics {
+  overall: number | null;
+  workshop: number | null;
+  standup: number | null;
+  mentoring: number | null;
+}
+
+interface AttendanceTotals {
+  overall: number | null;
+  workshop: number | null;
+  standup: number | null;
+  mentoring: number | null;
+}
+
+interface AttendancePercentages {
+  overall: number | null;
+  workshop: number | null;
+  standup: number | null;
+  mentoring: number | null;
+}
+
+interface AttendanceData {
+  student_count: number;
+  totals: AttendanceTotals;
+  averages: AttendanceMetrics;
+  percentages: AttendancePercentages;
+}
+
+interface FacultyAttendanceResponse {
+  data: AttendanceData | null;
+}
+
 definePageMeta({
-  layout: "faculty",
-  middleware: ["faculty"],
+  layout: "faculty" as any,
+  middleware: ["faculty"] as any,
 });
 
-const { data, pending, error, refresh } = await useFetch(
-  "/api/faculty/attendance",
-);
+const { data, pending, error, refresh } =
+  await useFetch<FacultyAttendanceResponse>("/api/faculty/attendance");
 
 const attendance = computed(() => data.value?.data || null);
 

@@ -1,7 +1,50 @@
 <script setup lang="ts">
+interface AttendanceMetrics {
+  overall: number | null;
+  workshop: number | null;
+  standup: number | null;
+  mentoring: number | null;
+}
+
+interface AttendanceTotals {
+  overall: number | null;
+  workshop: number | null;
+  standup: number | null;
+  mentoring: number | null;
+}
+
+interface AttendancePercentages {
+  overall: number | null;
+  workshop?: number | null;
+  standup?: number | null;
+  mentoring?: number | null;
+}
+
+interface AttendanceData {
+  student_count: number;
+  totals: AttendanceTotals;
+  averages: AttendanceMetrics;
+  percentages: AttendancePercentages;
+}
+
+interface CohortAnalytics {
+  cohort_id: string | null;
+  cohort_name: string;
+  students_count: number;
+  averages: AttendanceMetrics;
+}
+
+interface FacultyAttendanceResponse {
+  data: AttendanceData | null;
+}
+
+interface FacultyCohortResponse {
+  data: CohortAnalytics[];
+}
+
 definePageMeta({
-  layout: "faculty",
-  middleware: ["faculty"],
+  layout: "faculty" as any,
+  middleware: ["faculty"] as any,
 });
 
 const {
@@ -9,16 +52,17 @@ const {
   pending: attendancePending,
   error: attendanceError,
   refresh: refreshAttendance,
-} = await useFetch("/api/faculty/attendance");
+} = await useFetch<FacultyAttendanceResponse>("/api/faculty/attendance");
 
 const {
   data: cohortData,
   pending: cohortPending,
   error: cohortError,
   refresh: refreshCohorts,
-} = await useFetch("/api/faculty/attendance-by-cohort");
+} = await useFetch<FacultyCohortResponse>("/api/faculty/attendance-by-cohort");
 
 const attendance = computed(() => attendanceData.value?.data || null);
+
 const cohorts = computed(() => cohortData.value?.data || []);
 
 const pending = computed(() => attendancePending.value || cohortPending.value);
@@ -216,6 +260,7 @@ const formatPercent = (value: number | null | undefined) => {
                     <p class="font-medium">
                       {{ cohort.cohort_name }}
                     </p>
+
                     <p class="text-sm text-muted">
                       {{ formatNumber(cohort.students_count) }}
                       students
