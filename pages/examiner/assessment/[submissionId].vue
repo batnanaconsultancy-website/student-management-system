@@ -457,7 +457,7 @@ async function handleSubmit() {
     }
   }
 
-  if (!signatureText.value.trim()) {
+  if (!String(signatureText.value ?? '').trim()) {
     showError(
       'Signature required',
       'Type your full name as your signature before submitting.',
