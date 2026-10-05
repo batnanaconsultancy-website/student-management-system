@@ -207,12 +207,36 @@ export default defineEventHandler(async (event) => {
   }
 
   /*
-   * A submitted assessment cannot be edited.
-   *
-   * The future re-grading approval workflow will provide an explicit
-   * approved path for editing a submitted assessment.
+   * Check whether the current examiner has an approved re-grading
+   * request for this submitted assessment.
    */
-  if (existingAssessment?.status === 'SUBMITTED') {
+  const { data: regradingRequest, error: regradingRequestError } =
+    await supabase
+      .from('final_project_regrading_requests')
+      .select('id, request_number, status')
+      .eq('submission_id', submissionId)
+      .eq('examiner_id', examiner.id)
+      .order('request_number', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+  if (regradingRequestError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: regradingRequestError.message,
+    })
+  }
+
+  const regradingApproved = regradingRequest?.status === 'APPROVED'
+
+  /*
+   * A submitted assessment can only be edited when an administrator
+   * has approved its re-grading request.
+   */
+  if (
+    existingAssessment?.status === 'SUBMITTED' &&
+    !regradingApproved
+  ) {
     throw createError({
       statusCode: 403,
       statusMessage:
