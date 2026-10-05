@@ -91,14 +91,6 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  if (submission.status !== "SUBMITTED") {
-    throw createError({
-      statusCode: 400,
-      statusMessage:
-        "The Final Project Submission must already be submitted before re-grading can be approved.",
-    });
-  }
-
   /*
    * Load the examiner's submitted assessment.
    */

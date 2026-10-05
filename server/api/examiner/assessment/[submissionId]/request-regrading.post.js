@@ -74,14 +74,6 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  if (submission.status !== "SUBMITTED") {
-    throw createError({
-      statusCode: 400,
-      statusMessage:
-        "A re-grading request can only be made after the assessment has been submitted.",
-    });
-  }
-
   /*
    * The examiner must have a submitted assessment of their own.
    */
