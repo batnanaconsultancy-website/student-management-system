@@ -171,6 +171,7 @@ export default defineEventHandler(async (event) => {
     assessmentsResult,
     signaturesResult,
     gradesResult,
+    regradingRequestResult,
   ] = await Promise.all([
     adminClient
       .from('final_project_criteria')
@@ -228,6 +229,24 @@ export default defineEventHandler(async (event) => {
       .from('final_project_grades')
       .select('criterion_id, examiner_id, grade')
       .eq('submission_id', submissionId),
+
+    adminClient
+      .from('final_project_regrading_requests')
+      .select(`
+        id,
+        request_number,
+        reason,
+        status,
+        reviewed_by,
+        reviewed_at,
+        approved_at,
+        completed_at,
+        created_at
+      `)
+      .eq('submission_id', submissionId)
+      .eq('examiner_id', examiner.id)
+      .order('request_number', { ascending: false })
+      .limit(1),
   ])
 
   if (criteriaResult.error) {
@@ -265,6 +284,16 @@ export default defineEventHandler(async (event) => {
     })
   }
 
+  if (regradingRequestResult.error) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: regradingRequestResult.error.message,
+    })
+  }
+
+  const regradingRequest = regradingRequestResult.data?.[0] || null
+  const regradingApproved = regradingRequest?.status === 'APPROVED'
+
   const criteria = (criteriaResult.data || []).map((criterion) => ({
     id: criterion.id,
     label: criterion.label,
@@ -272,6 +301,7 @@ export default defineEventHandler(async (event) => {
     displayOrder: criterion.display_order,
     description: criterion.description,
   }))
+
   const assignedExaminers = (examinersResult.data || [])
     .map((row) => ({
       id: row.examiners?.id || row.examiner_id,
@@ -397,15 +427,22 @@ export default defineEventHandler(async (event) => {
       grades,
       canEdit:
         isCurrent &&
-        (!assessment || assessment.status === 'DRAFT'),
+        (
+          !assessment ||
+          assessment.status === 'DRAFT' ||
+          (
+            assessment.status === 'SUBMITTED' &&
+            regradingApproved
+          )
+        ),
     }
   })
 
   /*
-   * An examiner with an approved re-grading request will eventually
-   * receive canEdit=true through the re-grading workflow.
+   * An examiner with an approved re-grading request can edit only
+   * their own submitted assessment.
    *
-   * For now, only DRAFT assessments are editable.
+   * For normal assessment work, only DRAFT assessments are editable.
    */
   const submittedExaminerCount = examinerColumns.filter(
     (item) => item.status === 'SUBMITTED',
@@ -438,9 +475,13 @@ export default defineEventHandler(async (event) => {
   /*
    * The shared submission row becomes the authoritative overall
    * result only after all assigned examiners have submitted.
+   *
+   * An APPROVED re-grading request temporarily unlocks only the
+   * requesting examiner's submitted assessment.
    */
   const isReadOnly =
-    ownAssessment.status === 'SUBMITTED'
+    ownAssessment.status === 'SUBMITTED' &&
+    !regradingApproved
 
   const canEdit = examinerColumns.find(
     (item) => item.id === examiner.id,
@@ -469,6 +510,24 @@ export default defineEventHandler(async (event) => {
 
       isReadOnly,
       canEdit,
+
+      regrading: {
+        request: regradingRequest
+          ? {
+              id: regradingRequest.id,
+              requestNumber: regradingRequest.request_number,
+              reason: regradingRequest.reason,
+              status: regradingRequest.status,
+              reviewedBy: regradingRequest.reviewed_by,
+              reviewedAt: regradingRequest.reviewed_at,
+              approvedAt: regradingRequest.approved_at,
+              completedAt: regradingRequest.completed_at,
+              createdAt: regradingRequest.created_at,
+            }
+          : null,
+        approved: regradingApproved,
+      },
+
       reopenReason: submission.reopen_reason || null,
 
       assessmentActivated: [
