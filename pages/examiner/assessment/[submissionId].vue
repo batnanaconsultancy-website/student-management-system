@@ -305,10 +305,17 @@ const allExaminersSubmitted = computed(() => {
 const canEditSubmission = computed(() => {
   if (!isSubmission.value) return false
 
+  const isDraft =
+    currentExaminerStatus.value === 'DRAFT'
+
+  const isApprovedRegrading =
+    currentExaminerStatus.value === 'SUBMITTED' &&
+    data.value?.regrading?.approved === true
+
   return (
     currentExaminer.value?.isCurrent &&
     currentExaminer.value?.canEdit &&
-    currentExaminerStatus.value === 'DRAFT'
+    (isDraft || isApprovedRegrading)
   )
 })
 
