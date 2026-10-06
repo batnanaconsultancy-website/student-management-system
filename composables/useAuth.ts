@@ -37,8 +37,16 @@ export const useAuth = () => {
    * This is a UI/navigation state.
    * Backend authorization remains based on the actual database records.
    */
-  const savedRole = useCookie<Role | null>("active-dashboard-role", { default: () => null });
-  const activeRole = useState<Role>("activeRole", () => savedRole.value || "guest");
+  const savedRole = useCookie<Role | null>("active-dashboard-role", {
+    default: () => null,
+    maxAge: 60 * 60 * 24 * 30,
+    sameSite: "lax",
+  });
+
+  const activeRole = useState<Role>(
+    "activeRole",
+    () => savedRole.value || "guest",
+  );
 
   /*
    * Backwards-compatible alias.
