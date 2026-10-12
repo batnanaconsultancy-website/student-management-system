@@ -265,15 +265,26 @@ const allVisibleSelected = computed(
     filteredAttendees.value.every(isSelected),
 );
 
-const allAttendees = computed(() =>
-  (preview.value?.reports ?? []).flatMap((report) =>
-    (report.attendees ?? []).map((attendee) => ({
-      ...attendee,
-      reportStatus: report.status,
-      reportDetail: report.detail ?? "",
-    })),
-  ),
-);
+const allAttendees = computed(() => {
+  const seen = new Set<string>();
+
+  return (preview.value?.reports ?? []).flatMap((report) =>
+    (report.attendees ?? [])
+      .map((attendee) => ({
+        ...attendee,
+        reportStatus: report.status,
+        reportDetail: report.detail ?? "",
+      }))
+      .filter((attendee) => {
+        const key = recordKey(attendee);
+
+        if (seen.has(key)) return false;
+
+        seen.add(key);
+        return true;
+      }),
+  );
+});
 
 function isLikelyBot(attendee: AttendanceAttendee) {
   const identity =
