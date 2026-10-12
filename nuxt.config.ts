@@ -1,4 +1,4 @@
-import tailwindcss from "@tailwindcss/vite";
+﻿import tailwindcss from "@tailwindcss/vite";
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
@@ -56,7 +56,17 @@ export default defineNuxtConfig({
     canvasAccountId: process.env.CANVAS_ACCOUNT_ID,
     canvasExtraCourseIds: process.env.CANVAS_EXTRA_COURSE_IDS,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    // Shared secret with the AI Mentor (Anam) backend — required on the
+    gmailRefreshToken: process.env.GMAIL_REFRESH_TOKEN,
+    googleRefreshToken: process.env.GOOGLE_REFRESH_TOKEN,
+    mastersAttendanceGoogleClientId:
+      process.env.MASTERS_ATTENDANCE_GOOGLE_CLIENT_ID,
+    mastersAttendanceGoogleClientSecret:
+      process.env.MASTERS_ATTENDANCE_GOOGLE_CLIENT_SECRET,
+    mastersAttendanceRefreshToken: process.env.MASTERS_ATTENDANCE_REFRESH_TOKEN,
+    meetAttendanceStart: process.env.MEET_ATTENDANCE_START,
+    mastersAttendanceSpreadsheetId:
+      process.env.MASTERS_ATTENDANCE_SPREADSHEET_ID,
+    // Shared secret with the AI Mentor (Anam) backend â€” required on the
     // `x-mentor-secret` header for /api/mentor/* server-to-server calls.
     // Must match MENTOR_API_SECRET in the AI Mentor app's env.
     mentorApiSecret: process.env.MENTOR_API_SECRET,

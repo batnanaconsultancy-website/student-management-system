@@ -258,6 +258,14 @@ const existingCohortLabels = computed(() => [...new Set(students.value.map((s) =
             @click="openAddStudent"
           />
           <UButton
+            to="/admin/canvas-masters/attendance-preview"
+            label="Masters Attendance Preview"
+            icon="i-lucide-eye"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+          />
+          <UButton
             label="Sync Attendance Sheet"
             icon="i-lucide-calendar-clock"
             color="neutral"

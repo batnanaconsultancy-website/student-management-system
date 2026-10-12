@@ -28,3 +28,4 @@ logs
 !package.json
 !package-lock.json
 !tsconfig.json
+google-oauth-client.json
