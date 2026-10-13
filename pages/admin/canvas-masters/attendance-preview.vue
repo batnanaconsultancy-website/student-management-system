@@ -50,9 +50,66 @@ interface PreviewResponse {
   reports: AttendanceReport[];
 }
 
+interface ImportedAttendanceStudent {
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  meetings_attended: number;
+  total_duration_minutes: number | string;
+  synced_at: string;
+}
+
+interface ImportedAttendanceRecord {
+  meeting_id: string;
+  meeting_at: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  duration_minutes: number | string;
+  synced_at: string;
+}
+
+interface ImportedAttendanceResponse {
+  readOnly: boolean;
+  recordLimit: number;
+  recordLimitReached: boolean;
+  summary: {
+    students: number;
+    attendanceRecords: number;
+    meetings: number;
+    totalMeetingsAttended: number;
+    totalDurationMinutes: number;
+  };
+  students: ImportedAttendanceStudent[];
+  records: ImportedAttendanceRecord[];
+}
+
 const preview = ref<PreviewResponse | null>(null);
 const loading = ref(false);
 const errorMessage = ref("");
+
+const importedAttendance = ref<ImportedAttendanceResponse | null>(null);
+const importedAttendanceLoading = ref(false);
+const importedAttendanceError = ref("");
+
+async function loadImportedAttendance() {
+  if (importedAttendanceLoading.value) return;
+  importedAttendanceLoading.value = true;
+  importedAttendanceError.value = "";
+
+  try {
+    importedAttendance.value = await $fetch<ImportedAttendanceResponse>(
+      "/api/admin/canvas-masters/imported-attendance",
+    );
+  } catch (error: any) {
+    importedAttendanceError.value =
+      error?.data?.statusMessage ||
+      error?.statusMessage ||
+      "Could not load imported attendance. Verify the database migration and permissions.";
+  } finally {
+    importedAttendanceLoading.value = false;
+  }
+}
 
 async function loadPreview() {
   if (loading.value) return;
@@ -127,7 +184,7 @@ interface AttendanceReviewRow extends AttendanceAttendee {
 // onMounted(loadPreview)
 onMounted(async () => {
   restoreReviewState();
-  await loadPreview();
+  await Promise.allSettled([loadPreview(), loadImportedAttendance()]);
 });
 
 const searchQuery = ref("");
@@ -638,6 +695,214 @@ const filteredAttendees = computed(() => {
             </div>
           </section>
         </template>
+        <section
+          class="space-y-4 border-t border-gray-200 pt-6 dark:border-gray-800"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 class="text-lg font-semibold">
+                Imported Google Meet Attendance
+              </h2>
+              <p class="text-sm text-gray-500">
+                Attendance already saved in the dedicated database tables.
+              </p>
+            </div>
+            <UButton
+              :label="
+                importedAttendance
+                  ? 'Refresh Imported Data'
+                  : 'Load Imported Data'
+              "
+              icon="i-lucide-refresh-cw"
+              color="primary"
+              variant="outline"
+              size="sm"
+              :loading="importedAttendanceLoading"
+              @click="loadImportedAttendance"
+            />
+          </div>
+
+          <UAlert
+            color="info"
+            variant="subtle"
+            title="Separate and read-only"
+            description="These totals come from the imported Google Meet attendance tables. This dashboard does not merge data into or modify the existing Canvas Masters roster."
+            icon="i-lucide-database"
+          />
+
+          <UAlert
+            v-if="importedAttendanceError"
+            color="error"
+            variant="subtle"
+            title="Could not load imported attendance"
+            :description="importedAttendanceError"
+          />
+
+          <div
+            v-if="importedAttendanceLoading && !importedAttendance"
+            class="py-6 text-sm text-gray-500"
+          >
+            Loading imported attendance from the database...
+          </div>
+
+          <template v-if="importedAttendance">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <UCard>
+                <p class="text-sm text-gray-500">Students</p>
+                <p class="mt-2 text-2xl font-semibold">
+                  {{ importedAttendance.summary.students.toLocaleString() }}
+                </p>
+              </UCard>
+              <UCard>
+                <p class="text-sm text-gray-500">
+                  Meetings in displayed records
+                </p>
+                <p class="mt-2 text-2xl font-semibold">
+                  {{ importedAttendance.summary.meetings.toLocaleString() }}
+                </p>
+              </UCard>
+              <UCard>
+                <p class="text-sm text-gray-500">Attendance records</p>
+                <p class="mt-2 text-2xl font-semibold">
+                  {{
+                    importedAttendance.summary.attendanceRecords.toLocaleString()
+                  }}
+                </p>
+              </UCard>
+              <UCard>
+                <p class="text-sm text-gray-500">Total attendance duration</p>
+                <p class="mt-2 text-2xl font-semibold">
+                  {{
+                    Math.round(
+                      importedAttendance.summary.totalDurationMinutes,
+                    ).toLocaleString()
+                  }}
+                  min
+                </p>
+              </UCard>
+            </div>
+
+            <UAlert
+              v-if="importedAttendance.recordLimitReached"
+              color="warning"
+              variant="subtle"
+              title="Record display limit reached"
+              :description="
+                'Showing the first ' +
+                importedAttendance.recordLimit.toLocaleString() +
+                ' meeting records. The record table may not include every stored record.'
+              "
+            />
+
+            <section class="space-y-3">
+              <h3 class="font-semibold">Student attendance totals</h3>
+              <div
+                class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800"
+              >
+                <table
+                  class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800"
+                >
+                  <thead class="bg-gray-50 dark:bg-gray-900">
+                    <tr>
+                      <th class="px-3 py-3 text-left font-medium">Student</th>
+                      <th class="px-3 py-3 text-left font-medium">Email</th>
+                      <th class="px-3 py-3 text-right font-medium">Meetings</th>
+                      <th class="px-3 py-3 text-right font-medium">
+                        Duration (min)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+                    <tr
+                      v-for="student in importedAttendance.students"
+                      :key="student.email"
+                    >
+                      <td class="px-3 py-3">
+                        {{
+                          [student.first_name, student.last_name]
+                            .filter(Boolean)
+                            .join(" ") || "—"
+                        }}
+                      </td>
+                      <td class="px-3 py-3">{{ student.email }}</td>
+                      <td class="px-3 py-3 text-right">
+                        {{ student.meetings_attended }}
+                      </td>
+                      <td class="px-3 py-3 text-right">
+                        {{
+                          Number(
+                            student.total_duration_minutes,
+                          ).toLocaleString()
+                        }}
+                      </td>
+                    </tr>
+                    <tr v-if="importedAttendance.students.length === 0">
+                      <td
+                        colspan="4"
+                        class="px-3 py-6 text-center text-gray-500"
+                      >
+                        No imported student totals found.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="space-y-3">
+              <h3 class="font-semibold">Individual meeting records</h3>
+              <div
+                class="max-h-96 overflow-auto rounded-lg border border-gray-200 dark:border-gray-800"
+              >
+                <table
+                  class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800"
+                >
+                  <thead class="sticky top-0 bg-gray-50 dark:bg-gray-900">
+                    <tr>
+                      <th class="px-3 py-3 text-left font-medium">
+                        Meeting date
+                      </th>
+                      <th class="px-3 py-3 text-left font-medium">Student</th>
+                      <th class="px-3 py-3 text-left font-medium">Email</th>
+                      <th class="px-3 py-3 text-right font-medium">
+                        Duration (min)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-200 dark:divide-gray-800">
+                    <tr
+                      v-for="record in importedAttendance.records"
+                      :key="record.meeting_id + ':' + record.email"
+                    >
+                      <td class="whitespace-nowrap px-3 py-3">
+                        {{ new Date(record.meeting_at).toLocaleString() }}
+                      </td>
+                      <td class="px-3 py-3">
+                        {{
+                          [record.first_name, record.last_name]
+                            .filter(Boolean)
+                            .join(" ") || "—"
+                        }}
+                      </td>
+                      <td class="px-3 py-3">{{ record.email }}</td>
+                      <td class="px-3 py-3 text-right">
+                        {{ Number(record.duration_minutes).toLocaleString() }}
+                      </td>
+                    </tr>
+                    <tr v-if="importedAttendance.records.length === 0">
+                      <td
+                        colspan="4"
+                        class="px-3 py-6 text-center text-gray-500"
+                      >
+                        No imported meeting records found.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </template>
+        </section>
       </div>
     </template>
   </UDashboardPanel>

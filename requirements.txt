@@ -13,3 +13,7 @@ requests==2.31.0
 # HTML parsing
 beautifulsoup4==4.12.3
 
+
+# Google Meet attendance report import
+google-auth>=2.29,<3
+google-api-python-client>=2.120,<3
