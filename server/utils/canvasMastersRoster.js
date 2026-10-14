@@ -79,7 +79,7 @@ export async function buildCanvasMastersRoster(supabase) {
     { data: alignments, error: alignmentsError },
     { data: assignments, error: assignmentsError },
     { data: submissions, error: submissionsError },
-    { data: sheetAttendance, error: attendanceError },
+    { data: meetAttendance, error: attendanceError },
     { data: syncStatusRows, error: syncStatusError },
   ] = await Promise.all([
     courseIds.length > 0
@@ -97,13 +97,13 @@ export async function buildCanvasMastersRoster(supabase) {
     syncedStudentIds.length > 0
       ? supabase.from('canvas_submissions').select('canvas_course_id, canvas_assignment_id, canvas_student_id, workflow_state, submitted_at, late').in('canvas_student_id', syncedStudentIds)
       : Promise.resolve({ data: [], error: null }),
-    supabase.from('canvas_sheet_attendance').select('email, meetings_attended, total_duration_minutes').in('email', rosterEmails),
+    supabase.from('canvas_masters_meet_attendance_summary').select('email, first_name, last_name, meetings_attended, total_duration_minutes, synced_at').in('email', rosterEmails),
     supabase.from('canvas_masters_sync_status').select('sync_key, last_synced_at'),
   ])
 
   for (const [name, err] of [
     ['courses', coursesError], ['outcomes', outcomesError], ['alignments', alignmentsError],
-    ['assignments', assignmentsError], ['submissions', submissionsError], ['attendance', attendanceError],
+    ['assignments', assignmentsError], ['submissions', submissionsError], ['Google Meet attendance summary', attendanceError],
     ['syncStatus', syncStatusError],
   ]) {
     if (err) throw createError({ statusCode: 500, statusMessage: `${name}: ${err.message}` })
@@ -111,10 +111,10 @@ export async function buildCanvasMastersRoster(supabase) {
 
   const syncStatus = {
     canvas: syncStatusRows?.find((r) => r.sync_key === 'canvas')?.last_synced_at || null,
-    attendance: syncStatusRows?.find((r) => r.sync_key === 'attendance')?.last_synced_at || null,
+    attendance: (meetAttendance || []).map((a) => a.synced_at).filter(Boolean).sort().at(-1) || null,
   }
 
-  const attendanceByEmail = new Map((sheetAttendance || []).map((a) => [a.email.toLowerCase(), a]))
+  const attendanceByEmail = new Map((meetAttendance || []).map((a) => [a.email.toLowerCase(), a]))
   const courseNameById = new Map((courses || []).map((c) => [c.canvas_course_id, c.name]))
 
   // Attendance percentage is relative to the top attendee within the

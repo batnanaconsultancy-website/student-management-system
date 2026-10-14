@@ -30,7 +30,6 @@ const syncStatus = ref<{ canvas: string | null; attendance: string | null }>({ c
 const loading = ref(false)
 const error = ref<string | null>(null)
 const search = ref('')
-const attendanceSyncing = ref(false)
 const canvasSyncing = ref(false)
 const lastCanvasSyncSummary = ref<any>(null)
 const syncProgress = ref<{ stage: string; current: number; total: number; label: string } | null>(null)
@@ -171,34 +170,6 @@ async function syncFromCanvas() {
   }
 }
 
-async function syncAttendanceSheet() {
-  attendanceSyncing.value = true
-  try {
-    const res = await $fetch('/api/admin/canvas-masters/attendance-sync', { method: 'POST', body: {} })
-    showSuccess('Attendance synced', `${res.data.studentsSynced} students updated from the sheet`)
-    await fetchRoster()
-  } catch (err: any) {
-    // If no CANVAS_ATTENDANCE_SHEET_URL is configured server-side, offer
-    // to paste one in for this sync only, rather than just failing.
-    if (err?.data?.statusCode === 400) {
-      const url = window.prompt('Paste the Google Sheet URL to sync attendance from:')
-      if (url) {
-        try {
-          const res = await $fetch('/api/admin/canvas-masters/attendance-sync', { method: 'POST', body: { sheetUrl: url } })
-          showSuccess('Attendance synced', `${res.data.studentsSynced} students updated from the sheet`)
-          await fetchRoster()
-        } catch (err2: any) {
-          showError('Attendance sync failed', err2?.data?.statusMessage || err2.message)
-        }
-      }
-    } else {
-      showError('Attendance sync failed', err?.data?.statusMessage || err.message)
-    }
-  } finally {
-    attendanceSyncing.value = false
-  }
-}
-
 onMounted(fetchRoster)
 
 function formatSyncDate(iso: string) {
@@ -264,15 +235,6 @@ const existingCohortLabels = computed(() => [...new Set(students.value.map((s) =
             color="neutral"
             variant="subtle"
             size="sm"
-          />
-          <UButton
-            label="Sync Attendance Sheet"
-            icon="i-lucide-calendar-clock"
-            color="neutral"
-            variant="subtle"
-            size="sm"
-            :loading="attendanceSyncing"
-            @click="syncAttendanceSheet"
           />
           <UButton
             label="Sync From Canvas"
