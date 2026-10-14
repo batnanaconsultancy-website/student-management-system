@@ -1,11 +1,11 @@
 import { serverSupabaseClient } from "#supabase/server";
 import { requireCanvasMastersAdmin } from "~/server/utils/canvasMastersRoster";
-import { startMastersAttendancePreviewJob } from "~/server/utils/mastersAttendancePreviewJob";
+import { getMastersAttendancePreviewSnapshot } from "~/server/utils/mastersAttendancePreviewSnapshot";
 
 export default defineEventHandler(async (event) => {
   const supabase = await serverSupabaseClient(event);
   await requireCanvasMastersAdmin(event, supabase);
 
-  // Start the read-only scan and return immediately.
-  return startMastersAttendancePreviewJob();
+  // Compatibility endpoint: return saved data only; do not start a live scan.
+  return getMastersAttendancePreviewSnapshot(supabase);
 });

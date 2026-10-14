@@ -165,8 +165,9 @@ def read_meeting_sheet(sheets, spreadsheet_id):
             f"Spreadsheet {spreadsheet_id} has unexpected attendee headers"
         )
 
-    # Aggregate repeated attendee intervals into one record per email.
+    # Preserve raw rows for the preview while retaining aggregated import records.
     attendees = {}
+    raw_attendees = []
 
     for row_number, row in enumerate(rows[1:], start=2):
         if not any(str(cell or "").strip() for cell in row):
@@ -177,6 +178,18 @@ def read_meeting_sheet(sheets, spreadsheet_id):
         last_name = str(padded[1] or "").strip()
         email = str(padded[2] or "").strip().lower()
         duration = parse_duration_minutes(padded[3])
+
+        raw_attendees.append({
+            "sourceRow": row_number,
+            "firstName": first_name,
+            "lastName": last_name,
+            "studentName": " ".join(part for part in (first_name, last_name) if part),
+            "studentEmail": email,
+            "durationMinutes": duration,
+            "timeJoined": str(padded[4] or "").strip(),
+            "timeExited": str(padded[5] or "").strip(),
+            "valid": bool(email and duration is not None and duration >= 0),
+        })
 
         if not email:
             continue
@@ -215,7 +228,7 @@ def read_meeting_sheet(sheets, spreadsheet_id):
             record["duration_minutes"], 2
         )
 
-    return title, list(attendees.values())
+    return title, list(attendees.values()), raw_attendees
 
 
 def collect_meetings(gmail, sheets, cutoff):
@@ -368,12 +381,15 @@ def collect_meetings(gmail, sheets, cutoff):
             continue
 
         # Read and validate every sheet before writing any database data.
-        title, records = read_meeting_sheet(sheets, spreadsheet_id)
+        title, records, raw_attendees = read_meeting_sheet(sheets, spreadsheet_id)
         meetings[spreadsheet_id] = {
             "meeting_id": spreadsheet_id,
             "meeting_at": meeting_at_utc,
             "title": title,
             "records": records,
+            "raw_attendees": raw_attendees,
+            "subject": subject,
+            "source_message_id": message.get("id", "unknown"),
         }
 
         print(
@@ -389,7 +405,11 @@ def collect_meetings(gmail, sheets, cutoff):
 
     print(f"Reports before cutoff skipped: {ignored_before_cutoff}")
     print(f"Non-attendance emails skipped: {len(skipped_non_attendance)}")
-    return list(meetings.values())
+    return list(meetings.values()), {
+        "gmail_messages_found": len(messages),
+        "skipped_before_cutoff": ignored_before_cutoff,
+        "non_attendance_emails_skipped": len(skipped_non_attendance),
+    }
 
 
 def sync_meetings(supabase, meetings, dry_run=False):
@@ -446,6 +466,103 @@ def sync_meetings(supabase, meetings, dry_run=False):
     print(json.dumps(summary, indent=2))
 
 
+def build_preview_snapshot(meetings, scan_stats, cutoff):
+    """Build the dashboard-compatible, read-only preview from validated sheets."""
+    reports = []
+    non_empty_rows = 0
+    rows_with_email = 0
+
+    for meeting in meetings:
+        meeting_at = meeting["meeting_at"].isoformat()
+        subject = meeting.get("subject") or meeting["title"]
+        raw_rows = meeting.get("raw_attendees", [])
+        attendees = []
+
+        for row in raw_rows:
+            attendee = {
+                **row,
+                "meetingAt": meeting_at,
+                "meetingId": meeting["meeting_id"],
+                "sourceReport": subject,
+            }
+            attendees.append(attendee)
+
+        non_empty_rows += len(raw_rows)
+        rows_with_email += sum(
+            1 for row in raw_rows if row.get("studentEmail")
+        )
+
+        reports.append({
+            "subject": subject,
+            "meetingAt": meeting_at,
+            "timestamp": int(
+                meeting["meeting_at"].timestamp() * 1000
+            ),
+            "spreadsheetId": meeting["meeting_id"],
+            "spreadsheetTitle": meeting["title"],
+            "attendeeRows": len(raw_rows),
+            "emailRows": sum(
+                1 for row in raw_rows if row.get("studentEmail")
+            ),
+            "attendees": attendees,
+            "status": "OK",
+            "detail": "Attendance sheet read and validated successfully.",
+        })
+
+    return {
+        "readOnly": True,
+        "cutoff": cutoff,
+        "summary": {
+            "gmailMessagesFound": scan_stats["gmail_messages_found"],
+            "eligibleReportEmails": len(meetings),
+            "skippedBeforeCutoff": scan_stats["skipped_before_cutoff"],
+            "unparseableMeetingTimes": 0,
+            "attendanceLinksNotFound": 0,
+            "uniqueSpreadsheetIdsFound": len(meetings),
+            "successfullyReadSpreadsheets": len(meetings),
+            "nonEmptyAttendeeRows": non_empty_rows,
+            "rowsContainingEmail": rows_with_email,
+            "errors": 0,
+        },
+        "reports": reports,
+    }
+
+
+def save_preview_attempt(supabase, status, error=None, preview=None):
+    """Update attempt metadata without replacing a prior snapshot on failure."""
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "snapshot_key": "latest",
+        "last_attempt_at": now,
+        "last_attempt_status": status,
+        "last_error": error,
+        "updated_at": now,
+    }
+
+    if preview is not None:
+        row["preview"] = preview
+        row["last_successful_scan_at"] = now
+
+    # Update an existing row so omitted preview fields remain unchanged.
+    update_values = {
+        key: value for key, value in row.items()
+        if key != "snapshot_key"
+    }
+    result = (
+        supabase.table("canvas_masters_attendance_preview")
+        .update(update_values)
+        .eq("snapshot_key", "latest")
+        .select("snapshot_key")
+        .execute()
+    )
+
+    # First run: there is no row to update, so create one.
+    if not result.data:
+        supabase.table(
+            "canvas_masters_attendance_preview"
+        ).insert(row).execute()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -455,17 +572,26 @@ def main():
     )
     args = parser.parse_args()
 
+    supabase = None
+
     try:
-        cutoff = parse_cutoff(
-            os.environ.get(
-                "MEET_ATTENDANCE_START", "2025-09-01T00:00:00"
-            ).strip()
-        )
+        cutoff_value = os.environ.get(
+            "MEET_ATTENDANCE_START", "2025-09-01T00:00:00"
+        ).strip()
+        cutoff = parse_cutoff(cutoff_value)
+
+        supabase_url = required_env("SUPABASE_URL")
+
+        if not args.dry_run:
+            role_key = required_env("SUPABASE_ROLE_KEY")
+            supabase = create_client(supabase_url, role_key)
+            save_preview_attempt(supabase, "running")
 
         client_id = required_env("MASTERS_ATTENDANCE_GOOGLE_CLIENT_ID")
-        client_secret = required_env("MASTERS_ATTENDANCE_GOOGLE_CLIENT_SECRET")
+        client_secret = required_env(
+            "MASTERS_ATTENDANCE_GOOGLE_CLIENT_SECRET"
+        )
         refresh_token = required_env("MASTERS_ATTENDANCE_REFRESH_TOKEN")
-        supabase_url = required_env("SUPABASE_URL")
 
         # Ensure the helper's credential builder sees the required values.
         os.environ["MASTERS_ATTENDANCE_GOOGLE_CLIENT_ID"] = client_id
@@ -483,20 +609,50 @@ def main():
             cache_discovery=False,
         )
 
-        # Collect and validate all source data before any writes.
-        meetings = collect_meetings(gmail, sheets, cutoff)
+        # Validate all source data before changing attendance or snapshot data.
+        meetings, scan_stats = collect_meetings(gmail, sheets, cutoff)
 
         if args.dry_run:
-            supabase = None
-        else:
-            role_key = required_env("SUPABASE_ROLE_KEY")
-            supabase = create_client(supabase_url, role_key)
+            sync_meetings(None, meetings, dry_run=True)
+            print("Dry run completed; database was not changed.")
+            return 0
 
-        sync_meetings(supabase, meetings, dry_run=args.dry_run)
-        print("Attendance sync completed successfully.")
+        # Preserve existing attendance synchronization behavior.
+        sync_meetings(supabase, meetings, dry_run=False)
+
+        preview = build_preview_snapshot(
+            meetings, scan_stats, cutoff_value
+        )
+        save_preview_attempt(
+            supabase, "completed", preview=preview
+        )
+
+        print(
+            "Saved Masters Attendance Preview snapshot: "
+            f"{len(preview['reports'])} reports, "
+            f"{preview['summary']['nonEmptyAttendeeRows']} attendee rows."
+        )
+        print("Attendance sync and preview snapshot completed successfully.")
         return 0
 
     except Exception as exc:
+        if supabase is not None:
+            try:
+                save_preview_attempt(
+                    supabase, "failed", error=str(exc)[:4000]
+                )
+                print(
+                    "Recorded failed attempt; the last successful "
+                    "preview snapshot was preserved.",
+                    file=sys.stderr,
+                )
+            except Exception as status_exc:
+                print(
+                    "WARNING: could not record failure status in Supabase: "
+                    f"{status_exc}",
+                    file=sys.stderr,
+                )
+
         print(f"ERROR: Attendance sync failed: {exc}", file=sys.stderr)
         return 1
 

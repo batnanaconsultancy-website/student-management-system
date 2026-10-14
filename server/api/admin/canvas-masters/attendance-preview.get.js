@@ -1,12 +1,11 @@
 import { serverSupabaseClient } from "#supabase/server";
 import { requireCanvasMastersAdmin } from "~/server/utils/canvasMastersRoster";
-import { getMastersAttendancePreviewJob } from "~/server/utils/mastersAttendancePreviewJob";
+import { getMastersAttendancePreviewSnapshot } from "~/server/utils/mastersAttendancePreviewSnapshot";
 
 export default defineEventHandler(async (event) => {
   const supabase = await serverSupabaseClient(event);
   await requireCanvasMastersAdmin(event, supabase);
 
-  // This endpoint only returns process-local status/results. It never
-  // waits for Google APIs.
-  return getMastersAttendancePreviewJob();
+  // Read the latest saved snapshot only. Never contact Google APIs here.
+  return getMastersAttendancePreviewSnapshot(supabase);
 });

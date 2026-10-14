@@ -95,7 +95,6 @@ interface ImportedAttendanceResponse {
 
 const preview = ref<PreviewResponse | null>(null);
 const scanStatus = ref<PreviewJobResponse["status"]>("idle");
-let previewPollTimer: ReturnType<typeof setTimeout> | undefined;
 const loading = ref(false);
 const errorMessage = ref("");
 
@@ -152,57 +151,6 @@ async function loadPreview() {
     loading.value = false;
   }
 }
-
-async function startPreviewScan() {
-  if (scanStatus.value === "running" || loading.value) return;
-
-  loading.value = true;
-  errorMessage.value = "";
-
-  try {
-    const result = await $fetch<PreviewJobResponse>(
-      "/api/admin/canvas-masters/attendance-preview",
-      { method: "POST" },
-    );
-
-    scanStatus.value = result.status;
-
-    if (result.preview) {
-      preview.value = result.preview;
-    }
-
-    if (result.status === "failed") {
-      errorMessage.value =
-        result.errorMessage || "The attendance preview scan failed.";
-    } else if (result.status === "running") {
-      pollPreviewUntilDone();
-    }
-  } catch (error: any) {
-    errorMessage.value =
-      error?.data?.statusMessage ||
-      error?.statusMessage ||
-      "Could not start the attendance preview scan.";
-  } finally {
-    loading.value = false;
-  }
-}
-
-function pollPreviewUntilDone() {
-  if (previewPollTimer) clearTimeout(previewPollTimer);
-  if (scanStatus.value !== "running") return;
-
-  previewPollTimer = setTimeout(async () => {
-    await loadPreview();
-
-    if (scanStatus.value === "running") {
-      pollPreviewUntilDone();
-    }
-  }, 3000);
-}
-
-onUnmounted(() => {
-  if (previewPollTimer) clearTimeout(previewPollTimer);
-});
 
 const summaryCards = computed(() => {
   const summary = preview.value?.summary;
@@ -493,19 +441,13 @@ const filteredAttendees = computed(() => {
             size="sm"
           />
           <UButton
-            :label="
-              scanStatus === 'running'
-                ? 'Scanning…'
-                : preview
-                  ? 'Refresh Preview'
-                  : 'Start Preview Scan'
-            "
+            :label="loading ? 'Refreshing…' : 'Refresh Preview'"
             icon="i-lucide-refresh-cw"
             color="primary"
             size="sm"
-            :loading="loading || scanStatus === 'running'"
-            :disabled="scanStatus === 'running'"
-            @click="startPreviewScan"
+            :loading="loading"
+            :disabled="loading"
+            @click="loadPreview"
           />
         </template>
       </UDashboardNavbar>
@@ -517,7 +459,7 @@ const filteredAttendees = computed(() => {
           color="info"
           variant="subtle"
           title="Read-only preview"
-          description="This page reads Google Meet report emails and linked attendance sheets. It does not modify the Canvas Masters roster or sync attendance."
+          description="This page displays the most recently saved preview from the daily Google Meet attendance scan. Refresh reloads the saved snapshot; it does not trigger a Google scan or change the Canvas Masters roster."
           icon="i-lucide-eye"
         />
 
@@ -543,8 +485,8 @@ const filteredAttendees = computed(() => {
           class="flex items-center gap-3 py-8 text-sm text-gray-500"
         >
           <UIcon name="i-lucide-loader-circle" class="size-5 animate-spin" />
-          Scanning Google Meet emails and linked attendance sheets. You can
-          leave this page open while the scan runs.
+          The scheduled attendance scan is running. The last successful
+          preview remains available until the new scan completes.
         </div>
 
         <template v-if="preview">
