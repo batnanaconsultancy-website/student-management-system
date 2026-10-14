@@ -548,16 +548,25 @@ def save_preview_attempt(supabase, status, error=None, preview=None):
         key: value for key, value in row.items()
         if key != "snapshot_key"
     }
-    result = (
+    # Check whether the snapshot exists before updating it.
+    # With the installed Supabase client, select() belongs on the
+    # table query before the update operation, not after update().eq().
+    existing = (
         supabase.table("canvas_masters_attendance_preview")
-        .update(update_values)
-        .eq("snapshot_key", "latest")
         .select("snapshot_key")
+        .eq("snapshot_key", "latest")
+        .limit(1)
         .execute()
     )
 
-    # First run: there is no row to update, so create one.
-    if not result.data:
+    if existing.data:
+        supabase.table(
+            "canvas_masters_attendance_preview"
+        ).update(update_values).eq(
+            "snapshot_key", "latest"
+        ).execute()
+    else:
+        # First run: create the initial snapshot row.
         supabase.table(
             "canvas_masters_attendance_preview"
         ).insert(row).execute()
