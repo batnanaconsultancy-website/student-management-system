@@ -50,6 +50,15 @@ interface PreviewResponse {
   reports: AttendanceReport[];
 }
 
+interface PreviewJobResponse {
+  status: "idle" | "running" | "completed" | "completed_with_errors" | "failed";
+  startedAt: string | null;
+  finishedAt: string | null;
+  errorMessage: string | null;
+  cachedAt: string | null;
+  preview: PreviewResponse | null;
+}
+
 interface ImportedAttendanceStudent {
   email: string;
   first_name: string | null;
@@ -85,6 +94,8 @@ interface ImportedAttendanceResponse {
 }
 
 const preview = ref<PreviewResponse | null>(null);
+const scanStatus = ref<PreviewJobResponse["status"]>("idle");
+let previewPollTimer: ReturnType<typeof setTimeout> | undefined;
 const loading = ref(false);
 const errorMessage = ref("");
 
@@ -114,21 +125,84 @@ async function loadImportedAttendance() {
 async function loadPreview() {
   if (loading.value) return;
   loading.value = true;
-  errorMessage.value = "";
 
   try {
-    preview.value = await $fetch<PreviewResponse>(
+    const result = await $fetch<PreviewJobResponse>(
       "/api/admin/canvas-masters/attendance-preview",
     );
+
+    scanStatus.value = result.status;
+
+    if (result.preview) {
+      preview.value = result.preview;
+    }
+
+    errorMessage.value =
+      result.status === "failed"
+        ? result.errorMessage || "The attendance preview scan failed."
+        : result.status === "completed_with_errors"
+          ? "The scan completed, but some reports could not be processed. Review the report statuses and details below."
+          : "";
   } catch (error: any) {
     errorMessage.value =
       error?.data?.statusMessage ||
       error?.statusMessage ||
-      "Could not load the attendance preview. Check the server configuration and logs.";
+      "Could not load the attendance preview status. Check the server logs.";
   } finally {
     loading.value = false;
   }
 }
+
+async function startPreviewScan() {
+  if (scanStatus.value === "running" || loading.value) return;
+
+  loading.value = true;
+  errorMessage.value = "";
+
+  try {
+    const result = await $fetch<PreviewJobResponse>(
+      "/api/admin/canvas-masters/attendance-preview",
+      { method: "POST" },
+    );
+
+    scanStatus.value = result.status;
+
+    if (result.preview) {
+      preview.value = result.preview;
+    }
+
+    if (result.status === "failed") {
+      errorMessage.value =
+        result.errorMessage || "The attendance preview scan failed.";
+    } else if (result.status === "running") {
+      pollPreviewUntilDone();
+    }
+  } catch (error: any) {
+    errorMessage.value =
+      error?.data?.statusMessage ||
+      error?.statusMessage ||
+      "Could not start the attendance preview scan.";
+  } finally {
+    loading.value = false;
+  }
+}
+
+function pollPreviewUntilDone() {
+  if (previewPollTimer) clearTimeout(previewPollTimer);
+  if (scanStatus.value !== "running") return;
+
+  previewPollTimer = setTimeout(async () => {
+    await loadPreview();
+
+    if (scanStatus.value === "running") {
+      pollPreviewUntilDone();
+    }
+  }, 3000);
+}
+
+onUnmounted(() => {
+  if (previewPollTimer) clearTimeout(previewPollTimer);
+});
 
 const summaryCards = computed(() => {
   const summary = preview.value?.summary;
@@ -419,12 +493,19 @@ const filteredAttendees = computed(() => {
             size="sm"
           />
           <UButton
-            :label="preview ? 'Refresh Preview' : 'Load Preview'"
+            :label="
+              scanStatus === 'running'
+                ? 'Scanning…'
+                : preview
+                  ? 'Refresh Preview'
+                  : 'Start Preview Scan'
+            "
             icon="i-lucide-refresh-cw"
             color="primary"
             size="sm"
-            :loading="loading"
-            @click="loadPreview"
+            :loading="loading || scanStatus === 'running'"
+            :disabled="scanStatus === 'running'"
+            @click="startPreviewScan"
           />
         </template>
       </UDashboardNavbar>
@@ -441,20 +522,29 @@ const filteredAttendees = computed(() => {
         />
 
         <UAlert
-          v-if="errorMessage"
+          v-if="errorMessage && scanStatus !== 'completed_with_errors'"
           color="error"
           variant="subtle"
           title="Could not load attendance preview"
           :description="errorMessage"
         />
 
+        <UAlert
+          v-if="scanStatus === 'completed_with_errors'"
+          color="warning"
+          variant="subtle"
+          title="Preview completed with errors"
+          description="Some reports could not be processed. Review each report's status and details before using this attendance data."
+          icon="i-lucide-alert-triangle"
+        />
+
         <div
-          v-if="loading && !preview"
+          v-if="scanStatus === 'running' && !preview"
           class="flex items-center gap-3 py-8 text-sm text-gray-500"
         >
           <UIcon name="i-lucide-loader-circle" class="size-5 animate-spin" />
-          Reading Google Meet reports and attendance sheets. This may take a
-          little while.
+          Scanning Google Meet emails and linked attendance sheets. You can
+          leave this page open while the scan runs.
         </div>
 
         <template v-if="preview">
