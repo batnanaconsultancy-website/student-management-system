@@ -164,7 +164,8 @@ BEGIN
 
     -- Rebuild only the dedicated Google Meet summary.
     -- Never delete or overwrite legacy canvas_sheet_attendance rows.
-    DELETE FROM public.canvas_masters_meet_attendance_summary;
+    DELETE FROM public.canvas_masters_meet_attendance_summary
+    WHERE email IS NOT NULL;
 
     WITH totals AS (
         SELECT
