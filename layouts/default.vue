@@ -46,20 +46,27 @@ const mainLinks: NavigationMenuItem[] = [
     },
   },
   {
-    label: "Canvas Bachelors",
-    to: "/admin/canvas",
-    ariaLabel: "Canvas Bachelors",
+    label: "Canvas",
     icon: "i-lucide-graduation-cap",
-    tooltip: { text: "Canvas Bachelors" },
-  },
-  {
-    label: "Canvas Masters",
-    to: "/admin/canvas-masters",
-    ariaLabel: "Canvas Masters",
-    icon: "i-lucide-award",
+    ariaLabel: "Canvas",
+    defaultOpen: false,
+    to: "/admin/canvas",
+    type: "trigger",
     tooltip: {
-      text: "Canvas Masters",
+      text: "Canvas",
     },
+    children: [
+      {
+        label: "Canvas Bachelors",
+        description: "Manage Canvas Bachelors.",
+        to: "/admin/canvas",
+      },
+      {
+        label: "Canvas Masters",
+        description: "Manage Canvas Masters and attendance.",
+        to: "/admin/canvas-masters",
+      },
+    ],
   },
   {
     label: "Final Project Assessment",
