@@ -70,6 +70,9 @@ const barColorClass = (iconColor) => {
 
 <template>
   <div>
+    <p class="text-xs font-semibold uppercase tracking-wide text-muted mb-2">
+      Low-stakes evidence
+    </p>
     <div class="flex items-center justify-between mb-3">
       <div class="flex items-center gap-2">
         <UIcon name="i-lucide-clipboard-check" class="size-4 text-muted" />

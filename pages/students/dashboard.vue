@@ -366,6 +366,9 @@
                   icon="i-pajamas:hourglass"
                   styles="2xl:min-h-[100px] lg:min-h-[80px]"
                 />
+                <div class="col-span-full text-xs font-semibold uppercase tracking-wide text-muted pt-2">
+                  Low-stakes evidence
+                </div>
                    <StudentDashboardStatCard
                   :value="studentData.workshops_attended ?? 0"
                   :percentage="`${studentData.cohort_attendance?.workshops?.percent ?? 0}%`"
