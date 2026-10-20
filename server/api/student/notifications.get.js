@@ -3,25 +3,14 @@
 // Returns system notifications for the logged-in student.
 // These are stored in student_notifications table (see SQL migration).
 import { createError } from 'h3'
-import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import { serverSupabaseClient } from '#supabase/server'
+import { resolveStudentViewContext } from '~/server/utils/studentView'
 
 export default defineEventHandler(async (event) => {
-  const supabase = await serverSupabaseClient(event)
-  const user = await serverSupabaseUser(event)
-
-  if (!user?.email) {
-    throw createError({ statusCode: 401, statusMessage: 'Not authenticated' })
-  }
-
-  const { data: student } = await supabase
-    .from('students')
-    .select('id')
-    .eq('email', user.email)
-    .maybeSingle()
-
-  if (!student) {
-    return { data: [], unread_count: 0 }
-  }
+  const authenticatedClient = await serverSupabaseClient(event)
+  const context = await resolveStudentViewContext(event, authenticatedClient)
+  const supabase = context.dataClient
+  const student = context.student
 
   const { data, error } = await supabase
     .from('student_notifications')

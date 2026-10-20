@@ -12,10 +12,12 @@
   const googleAccessToken = ref(null);
 
   // Use cached fetch for student dashboard data
+  // Use an isolated request key and never reuse cached student data.
+  const dashboardRequestId = useId();
   const { data: dashboardData, status: dashboardStatus } = useFetch('/api/student/dashboard', {
-    key: CACHE_KEYS.STUDENT_DASHBOARD,
-    getCachedData(key) {
-      return nuxtApp.payload.data[key] || nuxtApp.static.data[key]
+    key: `student-dashboard-${dashboardRequestId}`,
+    getCachedData() {
+      return undefined;
     }
   });
 
@@ -73,30 +75,123 @@
     }
   }
 
-  // Watch the token, refresh if undefined - only on client side
-  if (import.meta.client) {
-    watch(
-      googleAccessToken,
-      async (newToken) => {
-        if (!newToken) {
-          try {
-            await refreshGoogleToken();
-          } catch (error) {
-            console.error("Failed to refresh Google token", error);
-          }
-        }
-      },
-      { immediate: true }
-    );
+  // Wait for the server response to identify the session before touching
+  // Google credentials. Student View must never refresh the admin's token.
+  const googleTokenInitStarted = ref(false);
+
+  watch(
+    () => studentData.value.is_student_view,
+    async (isStudentView) => {
+      if (
+        !import.meta.client ||
+        typeof isStudentView !== 'boolean' ||
+        googleTokenInitStarted.value
+      ) {
+        return;
+      }
+
+      googleTokenInitStarted.value = true;
+
+      if (isStudentView) {
+        googleAccessToken.value = null;
+        return;
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      googleAccessToken.value = session?.provider_token || null;
+
+      if (!googleAccessToken.value) {
+        await refreshGoogleToken();
+      }
+    },
+    { immediate: true }
+  );
+
+  const isStudentView = computed(
+    () => studentData.value.is_student_view === true
+  );
+
+  // Redirect when the server-issued Student View session expires.
+  // Server-side API validation remains the actual security boundary.
+  let studentViewExpiryTimer = null;
+
+  watch(
+    [
+      () => studentData.value.is_student_view,
+      () => studentData.value.student_view?.expires_at,
+    ],
+    ([studentViewFlag, expiresAt]) => {
+      if (!import.meta.client) return;
+
+      if (studentViewExpiryTimer !== null) {
+        clearTimeout(studentViewExpiryTimer);
+        studentViewExpiryTimer = null;
+      }
+
+      if (studentViewFlag !== true) return;
+
+      const expiryTime = expiresAt ? Date.parse(expiresAt) : NaN;
+
+      // Fail closed if the session is marked active but its expiry is missing
+      // or invalid.
+      if (!Number.isFinite(expiryTime)) {
+        void navigateTo('/admin/dashboard', { replace: true });
+        return;
+      }
+
+      const remainingMs = expiryTime - Date.now();
+
+      if (remainingMs <= 0) {
+        void navigateTo('/admin/dashboard', { replace: true });
+        return;
+      }
+
+      studentViewExpiryTimer = setTimeout(() => {
+        studentViewExpiryTimer = null;
+        void navigateTo('/admin/dashboard', { replace: true });
+      }, remainingMs);
+    },
+    { immediate: true }
+  );
+
+  onBeforeUnmount(() => {
+    if (studentViewExpiryTimer !== null) {
+      clearTimeout(studentViewExpiryTimer);
+      studentViewExpiryTimer = null;
+    }
+  });
+
+  const studentViewExitBusy = ref(false);
+  const studentViewExitError = ref('');
+
+  async function exitStudentView() {
+    if (studentViewExitBusy.value) return;
+
+    studentViewExitBusy.value = true;
+    studentViewExitError.value = '';
+
+    try {
+      await $fetch('/api/admin/student-view/end', { method: 'POST' });
+      await navigateTo('/admin/dashboard', { replace: true });
+    } catch (error) {
+      studentViewExitError.value =
+        error?.data?.statusMessage ||
+        error?.statusMessage ||
+        'Unable to end Student View. Please try again.';
+    } finally {
+      studentViewExitBusy.value = false;
+    }
   }
 
-  onMounted(async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    googleAccessToken.value = session?.provider_token || null;
-  });
+  function formatStudentViewExpiry(value) {
+    if (!value) return 'Unknown';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Unknown';
+    return date.toLocaleString();
+  }
 
   // Format last_login as 'x days/hours/minutes ago'
   function formatLastLogin(dateString) {
@@ -156,6 +251,40 @@
 
         <!-- Actual Content -->
         <div v-else class="flex flex-col h-full 2xl:justify-between">
+        <UAlert
+          v-if="isStudentView"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-eye"
+          title="Student View — Read Only"
+          description="You are viewing this dashboard as an administrator. Student changes and write actions are disabled."
+          class="mb-6"
+        >
+          <template #description>
+            <div class="space-y-2">
+              <p>
+                Student:
+                <strong>{{ studentData.first_name }} {{ studentData.last_name }}</strong>
+                <span v-if="studentData.email"> ({{ studentData.email }})</span>
+              </p>
+              <p>Reason: {{ studentData.student_view?.reason || 'Not provided' }}</p>
+              <p>Session expires: {{ formatStudentViewExpiry(studentData.student_view?.expires_at) }}</p>
+              <p v-if="studentViewExitError" class="text-red-600">
+                {{ studentViewExitError }}
+              </p>
+              <UButton
+                color="warning"
+                variant="solid"
+                :loading="studentViewExitBusy"
+                :disabled="studentViewExitBusy"
+                @click="exitStudentView"
+              >
+                Exit Student View
+              </UButton>
+            </div>
+          </template>
+        </UAlert>
+
         <div class="w-full justify-between items-start lg:items-center flex flex-col lg:flex-row">
           <StudentDashboardGreetings v-if="studentData.first_name" :first_name="studentData.first_name" />
 
@@ -171,7 +300,10 @@
 
         <UPageGrid class="grid-cols-1 sm:grid-cols-1 lg:grid-cols-2 mt-14 lg:gap-10">
           <div class="flex flex-col gap-1">            
-            <StudentDashboardMeetingsDisplay :googleAccessToken="googleAccessToken" />
+            <StudentDashboardMeetingsDisplay
+              :googleAccessToken="googleAccessToken"
+              :studentView="isStudentView"
+            />
 
             <StudentDashboardDeadlinesCard />
           </div>

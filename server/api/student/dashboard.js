@@ -1,17 +1,17 @@
-import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import { serverSupabaseClient } from '#supabase/server'
 import { isSeasonCompleted } from '~/server/utils/seasonCompletion'
 import { computeCohortAttendance } from '~/server/utils/cohortAttendance'
+import { resolveStudentViewContext } from '~/server/utils/studentView'
 
 export default defineEventHandler(async (event) => {
   try {
-    const client = await serverSupabaseClient(event)
-    const user = await serverSupabaseUser(event)
+    const authenticatedClient = await serverSupabaseClient(event)
+    const context = await resolveStudentViewContext(event, authenticatedClient)
+    const client = context.dataClient
 
-    if (!user?.email) {
-      throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
-    }
-
-    // Fetch student data with program and cohort info
+    // Load only the student bound to the authenticated account or the
+    // server-validated Student View session. Never accept a target ID
+    // from the browser for this dashboard request.
     const { data: studentData, error: studentError } = await client
       .from('students')
       .select(`
@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
         programs:program_id ( id, name ),
         cohorts:cohort_id ( id, name )
       `)
-      .eq('email', user.email)
+      .eq('id', context.student.id)
       .maybeSingle()
 
     if (studentError) {
@@ -109,7 +109,14 @@ export default defineEventHandler(async (event) => {
         filtered_seasons: filteredSeasons,
         total_seasons: filteredSeasons.length,
         completed_seasons: completedSeasonsCount,
-        cohort_attendance: cohortAttendance
+        cohort_attendance: cohortAttendance,
+        is_student_view: context.isStudentView,
+        student_view: context.isStudentView ? {
+          session_id: context.session.id,
+          started_at: context.session.started_at,
+          expires_at: context.session.expires_at,
+          reason: context.session.reason
+        } : null
       }
     }
   } catch (err) {

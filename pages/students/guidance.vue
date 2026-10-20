@@ -28,9 +28,29 @@ const canSubmit = computed(
 const { data: historyData, refresh: refreshHistory, status: historyStatus } =
   useFetch("/api/student/guidance-requests");
 const history = computed(() => historyData.value?.data || []);
+const isStudentView = ref(false);
+const studentViewStatusLoaded = ref(false);
+
+onMounted(async () => {
+  try {
+    const result = await $fetch<{ active?: boolean }>(
+      "/api/admin/student-view/status",
+    );
+    isStudentView.value = result?.active === true;
+  } catch {
+    // Ordinary student sessions are not allowed to call this admin endpoint.
+    isStudentView.value = false;
+  } finally {
+    studentViewStatusLoaded.value = true;
+  }
+});
 
 async function submitRequest() {
-  if (!canSubmit.value) return;
+  if (
+    !studentViewStatusLoaded.value ||
+    isStudentView.value ||
+    !canSubmit.value
+  ) return;
   submitting.value = true;
   submitError.value = null;
   submitSuccess.value = false;
@@ -81,7 +101,19 @@ function formatDate(d: string) {
 
     <template #body>
       <div class="max-w-3xl mx-auto w-full space-y-8 pb-10">
-        <UCard>
+        <UCard v-if="!studentViewStatusLoaded">
+          <div class="text-sm text-muted">
+            Checking access…
+          </div>
+        </UCard>
+
+        <UCard v-else-if="isStudentView">
+          <div class="text-sm text-muted">
+            Read-only Student View: submitting guidance requests is disabled.
+          </div>
+        </UCard>
+
+        <UCard v-else-if="studentViewStatusLoaded && !isStudentView">
           <template #header>
             <div>
               <h2 class="text-lg font-semibold text-highlighted">Submit a request</h2>

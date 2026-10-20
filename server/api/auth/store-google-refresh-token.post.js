@@ -1,4 +1,4 @@
-import { createError, readBody, setCookie, getRequestProtocol } from 'h3'
+import { createError, readBody, setCookie, getRequestProtocol, getCookie } from 'h3'
 
 // POST /api/auth/store-google-refresh-token
 //
@@ -22,6 +22,14 @@ import { createError, readBody, setCookie, getRequestProtocol } from 'h3'
 // automatically tightens to secure-only once the app is served over
 // https.
 export default defineEventHandler(async (event) => {
+  // Do not replace the administrator's Google credentials during Student View.
+  if (getCookie(event, 'student_view_session')) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Google token storage is disabled during Student View',
+    })
+  }
+
   const body = await readBody(event)
   const refreshToken = body?.refreshToken
 

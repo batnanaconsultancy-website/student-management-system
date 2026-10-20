@@ -348,6 +348,7 @@ interface SeasonDeadline {
   name: string;
   start_date: string;
   end_date: string;
+  program_cohort_season_id?: string;
   type: number;
 }
 
@@ -503,7 +504,10 @@ watch(
 /* Season-specific projects                                                   */
 /* -------------------------------------------------------------------------- */
 
+let seasonProjectLoadRequestId = 0;
+
 const loadProjectsForSeason = async (seasonId: string) => {
+  const requestId = ++seasonProjectLoadRequestId;
   console.log("🔍 loadProjectsForSeason called with seasonId:", seasonId);
 
   if (!seasonId) {
@@ -540,25 +544,7 @@ const loadProjectsForSeason = async (seasonId: string) => {
     isFinalProjectSeason,
   });
 
-  const { data: rawPcsData, error: pcsError } = await supabase
-    .from("program_cohort_seasons")
-    .select("id, start_date, end_date")
-    .eq("season_id", seasonId)
-    .eq("cohort_id", cohortId)
-    .eq("program_id", programId)
-    .single();
-
-  /*
-   * Supabase's generated relationship type can become `never` here
-   * depending on the generated database types. We know exactly what
-   * this query returns, so type the boundary explicitly.
-   */
-  const pcsData = rawPcsData as unknown as ProgramCohortSeasonRow | null;
-
-  console.log("🔗 program_cohort_seasons query result:", {
-    pcsData,
-    pcsError,
-  });
+  const programCohortSeasonId = selectedSeason?.program_cohort_season_id;
 
   /*
    * Prevent an older async request from overwriting a newer season.
@@ -570,9 +556,7 @@ const loadProjectsForSeason = async (seasonId: string) => {
     return;
   }
 
-  if (pcsError || !pcsData) {
-    console.error("❌ Error fetching program_cohort_season:", pcsError);
-
+  if (!programCohortSeasonId || !selectedSeason) {
     timelineError.value =
       `No schedule is configured for "${seasonName}" for your program/cohort yet. ` +
       `An admin needs to set start/end dates for this season under your program in Seasons management.`;
@@ -583,11 +567,9 @@ const loadProjectsForSeason = async (seasonId: string) => {
 
   timelineError.value = null;
 
-  const programCohortSeasonId = pcsData.id;
+  const seasonStartDate = new Date(selectedSeason.start_date ?? monthStart);
 
-  const seasonStartDate = new Date(pcsData.start_date ?? monthStart);
-
-  const seasonEndDate = new Date(pcsData.end_date ?? monthEnd);
+  const seasonEndDate = new Date(selectedSeason.end_date ?? monthEnd);
 
   console.log("✅ Found program_cohort_season_id:", programCohortSeasonId);
 
@@ -638,25 +620,18 @@ const loadProjectsForSeason = async (seasonId: string) => {
   /*
    * Fetch projects.
    */
-  const { data: rawProjectSchedules, error: scheduleError } = await supabase
-    .from("program_cohort_season_projects")
-    .select(
-      `
-      id,
-      start_date,
-      end_date,
-      projects!inner (
-        id,
-        name,
-        description
-      )
-    `,
-    )
-    .eq("program_cohort_season_id", programCohortSeasonId);
+  let projectSchedules: ProjectScheduleRow[] | null = null;
+  let scheduleError: unknown = null;
 
-  const projectSchedules = rawProjectSchedules as unknown as
-    | ProjectScheduleRow[]
-    | null;
+  try {
+    const result = await $fetch<{ data: ProjectScheduleRow[] }>(
+      "/api/student/timeline-projects",
+      { query: { programCohortSeasonId } },
+    );
+    projectSchedules = result.data ?? [];
+  } catch (error) {
+    scheduleError = error;
+  }
 
   console.log(
     "🔍 Fetching projects for program_cohort_season_id:",
@@ -668,10 +643,13 @@ const loadProjectsForSeason = async (seasonId: string) => {
     scheduleError,
   });
 
-  if (selectedSeasonId.value !== seasonId) {
-    console.log(
-      "⏭️ Stale loadProjectsForSeason call (season changed since), discarding result",
-    );
+  if (
+    requestId !== seasonProjectLoadRequestId ||
+    selectedSeasonId.value !== seasonId ||
+    currentDate.value.getFullYear() !== year ||
+    currentDate.value.getMonth() !== month
+  ) {
+    console.log("⏭️ Discarding stale season project response");
     return;
   }
 
@@ -841,54 +819,35 @@ const addSeasonsToTimeline = async (seasons: SeasonRecord[]) => {
     for (const seasonId of seasonGroup.ids) {
       console.log(`  🔍 Fetching projects for seasonId: ${seasonId}`);
 
-      const { data: rawPcsData, error: pcsError } = await supabase
-        .from("program_cohort_seasons")
-        .select("id")
-        .eq("season_id", seasonId)
-        .eq("cohort_id", studentCohortId.value as string)
-        .eq("program_id", studentProgramId.value as string)
-        .maybeSingle();
+      const seasonDeadline = cohortSeasonsDeadlines.value.find(
+        (season) => String(season.id) === String(seasonId),
+      );
+      const programCohortSeasonId =
+        seasonDeadline?.program_cohort_season_id;
 
-      const pcsData = rawPcsData as unknown as ProgramCohortSeasonRow | null;
-
-      console.log("    🔗 PCS lookup result:", {
-        pcsData,
-        pcsError,
-      });
-
-      if (!pcsData) {
-        console.log("    ⏭️ No program_cohort_season found, skipping");
+      if (!programCohortSeasonId) {
+        console.log("    ⏭️ No schedule ID for this season, skipping");
         continue;
       }
 
-      console.log(`    ✅ Found program_cohort_season_id: ${pcsData.id}`);
+      let projectSchedules: ProjectScheduleRow[] = [];
 
-      const { data: rawProjectSchedules, error: projError } = await supabase
-        .from("program_cohort_season_projects")
-        .select(
-          `
-          id,
-          start_date,
-          end_date,
-          projects!inner (
-            id,
-            name,
-            description
-          )
-        `,
-        )
-        .eq("program_cohort_season_id", pcsData.id);
-
-      const projectSchedules = rawProjectSchedules as unknown as
-        | ProjectScheduleRow[]
-        | null;
+      try {
+        const result = await $fetch<{ data: ProjectScheduleRow[] }>(
+          "/api/student/timeline-projects",
+          { query: { programCohortSeasonId } },
+        );
+        projectSchedules = result.data ?? [];
+      } catch (error) {
+        console.error("    ❌ Failed to load overview projects:", error);
+        continue;
+      }
 
       console.log("    📦 Project schedules result:", {
-        count: projectSchedules?.length || 0,
-        projError,
+        count: projectSchedules.length,
       });
 
-      if (!projectSchedules || projectSchedules.length === 0) {
+      if (projectSchedules.length === 0) {
         continue;
       }
 
@@ -968,7 +927,11 @@ const addSeasonsToTimeline = async (seasons: SeasonRecord[]) => {
 
   Object.assign(projectTemplates, timelineProjects);
 
-  loadProjectsForCurrentMonth();
+  if (selectedSeasonId.value) {
+    void loadProjectsForSeason(selectedSeasonId.value);
+  } else {
+    loadProjectsForCurrentMonth();
+  }
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1438,118 +1401,60 @@ const nextMonth = () => {
 /* Supabase                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const supabase = useSupabaseClient();
-
 /* -------------------------------------------------------------------------- */
 /* Load season deadlines                                                       */
 /* -------------------------------------------------------------------------- */
 
 const loadSeasonDeadlines = async () => {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  try {
+    const response = await $fetch<{
+      data: {
+        studentProgramId: string;
+        studentCohortId: string;
+        currentSeasonId: string | null;
+        studentSeasons: SeasonOption[];
+        cohortSeasonsDeadlines: SeasonDeadline[];
+      };
+    }>("/api/student/timeline-seasons");
 
-  const email = session?.user?.email ?? "";
+    const data = response.data;
+    if (!data) return;
 
-  const { data: rawStudent } = await supabase
-    .from("students")
-    .select("cohort_id, program_id, current_season_id")
-    .eq("email", email)
-    .single();
+    studentProgramId.value = data.studentProgramId;
+    studentCohortId.value = data.studentCohortId;
+    studentSeasons.value = data.studentSeasons ?? [];
 
-  const student = rawStudent as unknown as StudentRecord | null;
+    const deadlines = data.cohortSeasonsDeadlines ?? [];
+    cohortSeasonsDeadlines.value = deadlines;
 
-  if (!student) {
-    return;
-  }
-
-  studentProgramId.value = student.program_id;
-
-  studentCohortId.value = student.cohort_id;
-
-  /*
-   * Important:
-   * after checking `student`, these values are
-   * known to be strings.
-   */
-  const cohortId = student.cohort_id;
-
-  const programId = student.program_id;
-
-  const { data: rawSeasonsProgress, error: progressError } = await supabase
-    .from("program_cohort_seasons")
-    .select(
-      `
-        start_date,
-        end_date,
-        cohort_id,
-        seasons!inner (
-          id,
-          name,
-          program_id
-        )
-      `,
-    )
-    .eq("cohort_id", cohortId)
-    .eq("program_id", programId)
-    .order("start_date", {
-      ascending: true,
-      nullsFirst: false,
-    });
-
-  /*
-   * Type the joined Supabase result explicitly.
-   * This eliminates the `season.seasons` -> `never`
-   * errors without spreading `as any` through the component.
-   */
-  const seasonsProgress = rawSeasonsProgress as unknown as
-    | ProgramCohortSeasonProgressRow[]
-    | null;
-
-  studentSeasons.value =
-    seasonsProgress?.map((season) => ({
-      label: season.seasons.name,
-      value: String(season.seasons.id),
-    })) ?? [];
-
-  console.log("Fetched seasons progress:", {
-    seasonsProgress,
-    progressError,
-  });
-
-  const seasons: SeasonRecord[] =
-    seasonsProgress?.map((season) => ({
-      id: String(season.seasons.id),
-      name: season.seasons.name,
+    const seasons: SeasonRecord[] = deadlines.map((season) => ({
+      id: String(season.id),
+      name: season.name,
       start_date: season.start_date,
       end_date: season.end_date,
-    })) ?? [];
+    }));
 
-  cohortSeasonsDeadlines.value = seasons.map((season) => ({
-    id: season.id,
-    name: season.name,
-    start_date: season.start_date,
-    end_date: season.end_date,
-    type: 2,
-  }));
+    console.log("Timeline seasons loaded through student API:", {
+      count: seasons.length,
+      currentSeasonId: data.currentSeasonId,
+    });
 
-  console.log("Cohort season deadlines:", cohortSeasonsDeadlines.value);
-
-  if (seasons.length > 0) {
-    await addSeasonsToTimeline(seasons);
-  }
-
-  /*
-   * Default to current student season.
-   */
-  if (student.current_season_id && !selectedSeasonId.value) {
-    const currentSeasonMatch = cohortSeasonsDeadlines.value.find(
-      (season) => String(season.id) === String(student.current_season_id),
-    );
-
-    if (currentSeasonMatch) {
-      selectedSeasonId.value = String(student.current_season_id);
+    if (seasons.length > 0) {
+      await addSeasonsToTimeline(seasons);
     }
+
+    if (data.currentSeasonId && !selectedSeasonId.value) {
+      const currentSeasonMatch = deadlines.find(
+        (season) => String(season.id) === String(data.currentSeasonId),
+      );
+
+      if (currentSeasonMatch) {
+        selectedSeasonId.value = String(data.currentSeasonId);
+      }
+    }
+  } catch (error) {
+    console.error("Failed to load timeline seasons:", error);
+    timelineError.value = "Unable to load the student's timeline seasons.";
   }
 };
 
