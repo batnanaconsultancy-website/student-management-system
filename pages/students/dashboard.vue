@@ -251,40 +251,48 @@
 
         <!-- Actual Content -->
         <div v-else class="flex flex-col h-full 2xl:justify-between">
-        <UAlert
-          v-if="isStudentView"
-          color="warning"
-          variant="subtle"
-          icon="i-lucide-eye"
-          title="Student View — Read Only"
-          description="You are viewing this dashboard as an administrator. Student changes and write actions are disabled."
-          class="mb-6"
-        >
-          <template #description>
-            <div class="space-y-2">
-              <p>
-                Student:
-                <strong>{{ studentData.first_name }} {{ studentData.last_name }}</strong>
-                <span v-if="studentData.email"> ({{ studentData.email }})</span>
-              </p>
-              <p>Reason: {{ studentData.student_view?.reason || 'Not provided' }}</p>
-              <p>Session expires: {{ formatStudentViewExpiry(studentData.student_view?.expires_at) }}</p>
-              <p v-if="studentViewExitError" class="text-red-600">
-                {{ studentViewExitError }}
-              </p>
-              <UButton
-                color="warning"
-                variant="solid"
-                :loading="studentViewExitBusy"
-                :disabled="studentViewExitBusy"
-                @click="exitStudentView"
-              >
-                Exit Student View
-              </UButton>
-            </div>
-          </template>
-        </UAlert>
 
+        <div v-if="isStudentView" class="mb-6">
+          <UAlert
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-eye"
+            title="Student View — Read Only"
+            description="You are viewing this dashboard as an administrator. Student changes and write actions are disabled."
+            class="mb-3"
+          />
+
+          <div class="rounded-lg border border-amber-300 p-4 space-y-3">
+            <p>
+              Student:
+              <strong>{{ studentData.first_name }} {{ studentData.last_name }}</strong>
+              <span v-if="studentData.email"> ({{ studentData.email }})</span>
+            </p>
+
+            <p>
+              Reason: {{ studentData.student_view?.reason || 'Not provided' }}
+            </p>
+
+            <p>
+              Session expires:
+              {{ formatStudentViewExpiry(studentData.student_view?.expires_at) }}
+            </p>
+
+            <p v-if="studentViewExitError" class="text-red-600">
+              {{ studentViewExitError }}
+            </p>
+
+            <UButton
+              color="warning"
+              variant="solid"
+              :loading="studentViewExitBusy"
+              :disabled="studentViewExitBusy"
+              @click="exitStudentView"
+            >
+              Exit Student View
+            </UButton>
+          </div>
+        </div>
         <div class="w-full justify-between items-start lg:items-center flex flex-col lg:flex-row">
           <StudentDashboardGreetings v-if="studentData.first_name" :first_name="studentData.first_name" />
 
@@ -299,7 +307,7 @@
         </div>
 
         <UPageGrid class="grid-cols-1 sm:grid-cols-1 lg:grid-cols-2 mt-14 lg:gap-10">
-          <div class="flex flex-col gap-1">            
+          <div class="flex flex-col gap-1">
             <StudentDashboardMeetingsDisplay
               :googleAccessToken="googleAccessToken"
               :studentView="isStudentView"
@@ -307,7 +315,7 @@
 
             <StudentDashboardDeadlinesCard />
           </div>
-           
+
            <div class="flex flex-col justify-between 2xl:gap-4">
               <StudentDashboardProgress
                 v-if="studentData"
@@ -319,14 +327,14 @@
               />
 
               <UPageGrid class="grid-cols-2 lg:grid-cols-2 gap-3 2xl:gap-4">
-                
+
                 <StudentDashboardStatCard
                     :value="currentSeasonName"
                     label="Current Season"
                     icon="i-pajamas:planning"
                     styles=" 2xl:min-h-[100px] lg:min-h-[80px]"
                 />
-                
+
                 <StudentDashboardStatCard
                   :value="expectedSeasonName"
                   label="Expected Season"
