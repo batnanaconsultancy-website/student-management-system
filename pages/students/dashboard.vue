@@ -250,9 +250,9 @@
         </div>
 
         <!-- Actual Content -->
-        <div v-else class="flex flex-col h-full 2xl:justify-between">
+        <div v-else class="flex min-h-full flex-col overflow-visible 2xl:justify-between">
 
-        <div v-if="isStudentView" class="mb-6">
+        <div v-if="isStudentView" class="mb-6 w-full shrink-0 overflow-visible">
           <UAlert
             color="warning"
             variant="subtle"
