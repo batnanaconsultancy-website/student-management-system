@@ -3,19 +3,27 @@ import { defineNuxtRouteMiddleware, navigateTo } from "nuxt/app";
 export default defineNuxtRouteMiddleware(async () => {
   const { role, getUser } = useAuth();
 
-  // Ensure we have the latest user data and role.
   await getUser();
 
-  console.log("Student-only middleware - current role:", role.value);
-
-  // Only ordinary student/user accounts may continue.
+  // Ordinary student accounts retain their existing access.
   if (role.value === "user") {
     return;
   }
 
-  // Redirect staff and legacy examiner accounts to their
-  // appropriate primary dashboard.
+  // Administrators may use this page only while the server confirms
+  // their own active, unexpired Student View session.
   if (role.value === "admin") {
+    try {
+      const requestFetch = useRequestFetch();
+      const status = await requestFetch("/api/admin/student-view/status");
+
+      if (status?.active === true) {
+        return;
+      }
+    } catch {
+      // Fail closed if the session cannot be verified.
+    }
+
     return navigateTo("/admin/dashboard");
   }
 

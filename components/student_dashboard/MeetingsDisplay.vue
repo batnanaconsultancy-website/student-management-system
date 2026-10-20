@@ -4,21 +4,27 @@
 
   const props = defineProps({
     googleAccessToken: { type: String, default: null },
+    studentView: { type: Boolean, default: false },
   });
 
   const nuxtApp = useNuxtApp();
+  const calendarRequestId = useId();
   const meetingsScroll = ref(null);
 
   // Use cached fetch for calendar events. Always fetch — admin-pinned
   // meetings should show even for students without Google Calendar connected.
   const { data: calendarData } = useFetch('/api/student/calendar-events', {
-    key: CACHE_KEYS.STUDENT_CALENDAR_TODAY,
+    key: props.studentView
+      ? `student-calendar-today-view-${calendarRequestId}`
+      : CACHE_KEYS.STUDENT_CALENDAR_TODAY,
     query: { period: 'today' },
-    headers: computed(() => ({
-      'x-google-token': props.googleAccessToken || ''
-    })),
+    headers: computed(() => props.studentView
+      ? {}
+      : { 'x-google-token': props.googleAccessToken || '' }
+    ),
     getCachedData(key) {
-      return nuxtApp.payload.data[key] || nuxtApp.static.data[key]
+      if (props.studentView) return undefined;
+      return nuxtApp.payload.data[key] || nuxtApp.static.data[key];
     }
   });
 

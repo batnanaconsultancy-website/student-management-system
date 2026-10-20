@@ -6,11 +6,8 @@ definePageMeta({
     middleware: ["auth", "student-only"],
 });
 
-const supabase = useSupabaseClient();
 const nuxtApp = useNuxtApp();
 
-// Google Calendar integration
-const googleAccessToken = ref(null);
 
 // Current date tracking
 const currentDate = ref(new Date());
@@ -145,9 +142,6 @@ const calendarCacheKey = computed(() =>
 const { data: calendarData, refresh: refreshCalendar } = useFetch('/api/student/calendar-events', {
     key: calendarCacheKey.value,
     query: { period: 'month', month: currentMonth.value, year: currentYear.value },
-    headers: computed(() => ({
-        'x-google-token': googleAccessToken.value || ''
-    })),
     getCachedData(key) {
         return nuxtApp.payload.data[key] || nuxtApp.static.data[key]
     },
@@ -155,25 +149,6 @@ const { data: calendarData, refresh: refreshCalendar } = useFetch('/api/student/
 });
 
 const calendarEvents = computed(() => calendarData.value?.data || []);
-
-// Refresh Google token when expired
-async function refreshGoogleToken() {
-    // The refresh token lives in an httpOnly cookie now (set at login by
-    // /api/auth/store-google-refresh-token) -- this client code never
-    // sees it, just asks the server to use it.
-    try {
-        const dataGoogle = await $fetch("/api/auth/refresh-google-token", {
-            method: "POST",
-        });
-        googleAccessToken.value = dataGoogle.access_token;
-        return dataGoogle.access_token;
-    } catch (error) {
-        // 401 here just means no Google connection on file yet (or it's
-        // been revoked) -- not an error worth surfacing loudly.
-        console.error("Error refreshing token:", error);
-        return null;
-    }
-}
 
 // Get events for a specific date
 const getEventsForDate = (date) => {
@@ -189,35 +164,9 @@ const getEventsForDate = (date) => {
     return events;
 };
 
-// Initialize and fetch calendar data
-// Always fetch, even without a Google token — admin-pinned meetings
-// should still show up for students who haven't connected Google Calendar.
 onMounted(async () => {
-    const {
-        data: { session },
-    } = await supabase.auth.getSession();
-
-    googleAccessToken.value = session?.provider_token || null;
-
     await refreshCalendar();
 });
-
-// Watch for token changes and re-fetch events
-watch(
-    googleAccessToken,
-    async (newToken) => {
-      if (!newToken) {
-        try {
-          await refreshGoogleToken();
-        } catch (error) {
-          console.error("Failed to refresh Google token", error);
-        } finally {
-          await refreshCalendar();
-        }
-      }
-    },
-    { immediate: true }
-);
 
 // Re-fetch events when month changes (invalidate cache for new month)
 watch([currentMonth, currentYear], async () => {

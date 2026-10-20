@@ -24,6 +24,14 @@ import { createError, getCookie } from 'h3'
 // sees or handles the refresh token at any point in this flow. Only the
 // resulting short-lived access token is sent back to the browser.
 export default defineEventHandler(async (event) => {
+  // Never use the authenticated account's Google credentials in Student View.
+  if (getCookie(event, 'student_view_session')) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Google token refresh is disabled during Student View',
+    });
+  }
+
   const refreshToken = getCookie(event, 'google_refresh_token')
 
   if (!refreshToken) {

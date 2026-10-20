@@ -1,13 +1,11 @@
-import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import { serverSupabaseClient } from '#supabase/server'
+import { resolveStudentViewContext } from '~/server/utils/studentView'
 import { getOccurrenceDates, occurrenceToEvent } from '~/server/utils/meetingOccurrences'
 
 export default defineEventHandler(async (event) => {
   try {
-    const user = await serverSupabaseUser(event)
-
-    if (!user) {
-      throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
-    }
+    const authenticatedClient = await serverSupabaseClient(event)
+    const context = await resolveStudentViewContext(event, authenticatedClient)
 
     const query = getQuery(event)
     const period = query.period || 'today'
@@ -21,7 +19,7 @@ export default defineEventHandler(async (event) => {
     // personal Google Calendar events are intentionally NOT merged in here.
     // (Google Calendar sync code is left in place below, disabled, in case
     // it's wanted again later — see ENABLE_GOOGLE_CALENDAR_SYNC.)
-    const pinnedEvents = await getPinnedMeetingEvents(event, timeMin, timeMax)
+    const pinnedEvents = await getPinnedMeetingEvents(context, timeMin, timeMax)
 
     const ENABLE_GOOGLE_CALENDAR_SYNC = false
     if (!ENABLE_GOOGLE_CALENDAR_SYNC) {
@@ -73,13 +71,14 @@ export default defineEventHandler(async (event) => {
 
 // Fetches active scheduled_meetings visible to this student (RLS-scoped)
 // and expands their weekly recurrence into concrete occurrences within range.
-async function getPinnedMeetingEvents(event, timeMin, timeMax) {
+async function getPinnedMeetingEvents(context, timeMin, timeMax) {
   try {
-    const supabase = await serverSupabaseClient(event)
-    const { data: meetings, error } = await supabase
+    const { data: meetings, error } = await context.dataClient
       .from('scheduled_meetings')
       .select('*')
       .eq('is_active', true)
+      .or(`program_id.is.null,program_id.eq.${context.student.program_id}`)
+      .or(`cohort_id.is.null,cohort_id.eq.${context.student.cohort_id}`)
 
     if (error) {
       console.error('Error fetching scheduled meetings:', error)

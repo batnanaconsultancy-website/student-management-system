@@ -10,8 +10,25 @@ const { data, status, refresh } = useFetch('/api/student/notifications')
 
 const rows = computed(() => data.value?.data || [])
 const loading = computed(() => status.value === 'pending')
+const isStudentView = ref(false)
+const studentViewStatusLoaded = ref(false)
+
+onMounted(async () => {
+  try {
+    const result = await $fetch<{ active?: boolean }>(
+      '/api/admin/student-view/status',
+    )
+    isStudentView.value = result?.active === true
+  } catch {
+    // Ordinary student sessions are not allowed to call this admin endpoint.
+    isStudentView.value = false
+  } finally {
+    studentViewStatusLoaded.value = true
+  }
+})
 
 async function markRead(id?: string) {
+  if (!studentViewStatusLoaded.value || isStudentView.value) return
   await $fetch('/api/student/notifications-read', {
     method: 'POST',
     body: id ? { notification_ids: [id] } : {}
@@ -34,7 +51,7 @@ function formatDate(d: string) {
         </template>
         <template #right>
           <UButton
-            v-if="rows.some(r => !r.is_read)"
+            v-if="studentViewStatusLoaded && !isStudentView && rows.some(r => !r.is_read)"
             label="Mark all read"
             size="xs"
             color="neutral"
@@ -69,7 +86,7 @@ function formatDate(d: string) {
               <p class="text-xs text-dimmed mt-2">{{ formatDate(row.created_at) }}</p>
             </div>
             <UButton
-              v-if="!row.is_read"
+              v-if="studentViewStatusLoaded && !isStudentView && !row.is_read"
               icon="i-lucide-check"
               size="xs"
               color="neutral"

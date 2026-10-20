@@ -1,24 +1,12 @@
-import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import { serverSupabaseClient } from '#supabase/server'
+import { resolveStudentViewContext } from '~/server/utils/studentView'
 
 export default defineEventHandler(async (event) => {
   try {
-    const client = await serverSupabaseClient(event)
-    const user = await serverSupabaseUser(event)
-
-    if (!user?.email) {
-      throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
-    }
-
-    // Get student's cohort and program
-    const { data: student, error: studentError } = await client
-      .from('students')
-      .select('id, cohort_id, program_id')
-      .eq('email', user.email)
-      .single()
-
-    if (studentError || !student) {
-      throw createError({ statusCode: 404, statusMessage: 'Student not found' })
-    }
+    const authenticatedClient = await serverSupabaseClient(event)
+    const context = await resolveStudentViewContext(event, authenticatedClient)
+    const client = context.dataClient
+    const student = context.student
 
     // Fetch seasons for the student's cohort and program
     const { data: seasonsProgress, error: progressError } = await client
@@ -63,6 +51,7 @@ export default defineEventHandler(async (event) => {
       data: {
         studentProgramId: student.program_id,
         studentCohortId: student.cohort_id,
+        currentSeasonId: student.current_season_id ?? null,
         studentSeasons,
         cohortSeasonsDeadlines,
         rawSeasons: seasonsProgress

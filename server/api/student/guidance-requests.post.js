@@ -14,10 +14,12 @@ import { createError } from 'h3'
 import { serverSupabaseClient, serverSupabaseUser, serverSupabaseServiceRole } from '#supabase/server'
 import { GUIDANCE_CATEGORIES, GUIDANCE_REQUEST_WORD_LIMIT } from '~/constants/options'
 import { countWords } from '~/utils/wordCount'
+import { rejectStudentViewWrites } from '~/server/utils/studentView'
 
 const ISADORA_EMAIL = 'isadora@amsterdam.tech'
 
 export default defineEventHandler(async (event) => {
+  rejectStudentViewWrites(event)
   const client = await serverSupabaseClient(event)
   const user = await serverSupabaseUser(event)
 

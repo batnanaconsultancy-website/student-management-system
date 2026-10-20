@@ -12,6 +12,139 @@
   const nuxtApp = useNuxtApp();
   const bulkStatusModalOpen = ref(false);
 
+  const studentViewSearchTerm = ref("");
+  const studentViewResults = ref([]);
+  const studentViewSelectedStudent = ref(null);
+  const studentViewSearchBusy = ref(false);
+  const studentViewStartBusy = ref(false);
+  const studentViewError = ref("");
+  const studentViewReason = ref("");
+  const studentViewAuthorized = ref(false);
+  const studentViewActiveSession = ref(null);
+  const studentViewEndBusy = ref(false);
+
+  function studentViewErrorMessage(error, fallback) {
+    return error?.data?.statusMessage || error?.statusMessage || fallback;
+  }
+
+  async function loadStudentViewStatus() {
+    try {
+      const result = await $fetch("/api/admin/student-view/status", {
+        headers: { "Cache-Control": "no-cache" },
+      });
+      studentViewActiveSession.value = result?.active ? result.session : null;
+    } catch (error) {
+      studentViewError.value = studentViewErrorMessage(
+        error,
+        "Unable to check Student View session status."
+      );
+    }
+  }
+
+  onMounted(loadStudentViewStatus);
+
+  async function searchStudentViewStudents() {
+    const term = studentViewSearchTerm.value.trim();
+    studentViewError.value = "";
+    studentViewSelectedStudent.value = null;
+    studentViewResults.value = [];
+
+    if (term.length < 2) {
+      studentViewError.value = "Enter at least two characters of the student's email.";
+      return;
+    }
+
+    studentViewSearchBusy.value = true;
+    try {
+      const result = await $fetch("/api/admin/student-view/search", {
+        query: { q: term },
+      });
+      studentViewResults.value = result?.data || [];
+      if (!studentViewResults.value.length) {
+        studentViewError.value = "No matching student email was found.";
+      }
+    } catch (error) {
+      studentViewError.value = studentViewErrorMessage(
+        error,
+        "Student search failed. Please try again."
+      );
+    } finally {
+      studentViewSearchBusy.value = false;
+    }
+  }
+
+  function selectStudentForView(student) {
+    studentViewSelectedStudent.value = student;
+    studentViewError.value = "";
+    studentViewAuthorized.value = false;
+  }
+
+  async function startStudentView() {
+    const student = studentViewSelectedStudent.value;
+    const reason = studentViewReason.value.trim();
+
+    if (!student) {
+      studentViewError.value = "Search for and select a student first.";
+      return;
+    }
+    if (reason.length < 10) {
+      studentViewError.value = "Enter a troubleshooting reason of at least 10 characters.";
+      return;
+    }
+    if (!studentViewAuthorized.value) {
+      studentViewError.value = "Confirm that the student has verbally authorized this session.";
+      return;
+    }
+
+    studentViewStartBusy.value = true;
+    studentViewError.value = "";
+
+    try {
+      await $fetch("/api/admin/student-view/start", {
+        method: "POST",
+        body: {
+          student_email: student.email,
+          reason,
+          student_authorized: true,
+        },
+      });
+      await navigateTo("/students/dashboard");
+    } catch (error) {
+      studentViewError.value = studentViewErrorMessage(
+        error,
+        "Unable to start Student View."
+      );
+      await loadStudentViewStatus();
+    } finally {
+      studentViewStartBusy.value = false;
+    }
+  }
+
+  async function endStudentViewFromAdmin() {
+    studentViewEndBusy.value = true;
+    studentViewError.value = "";
+
+    try {
+      await $fetch("/api/admin/student-view/end", { method: "POST" });
+      studentViewActiveSession.value = null;
+      studentViewSelectedStudent.value = null;
+      studentViewReason.value = "";
+      studentViewAuthorized.value = false;
+      await loadStudentViewStatus();
+    } catch (error) {
+      studentViewError.value = studentViewErrorMessage(
+        error,
+        "Unable to end Student View. Please try again."
+      );
+    } finally {
+      studentViewEndBusy.value = false;
+    }
+  }
+
+  async function resumeStudentView() {
+    await navigateTo("/students/dashboard");
+  }
+
   // Use cached fetch for snapshot data
   const { data: snapshotData, status: snapshotStatus } = useFetch('/api/snapshot', {
     key: CACHE_KEYS.SNAPSHOT,
@@ -115,6 +248,117 @@
               <span>Data last updated: {{ lastScrapeDisplay }}</span>
             </div>
 
+            <section class="mx-4 my-4 space-y-4 rounded-xl border border-default p-4">
+              <div>
+                <h2 class="text-lg font-semibold">Student View</h2>
+                <p class="text-sm text-muted">
+                  Open a student's dashboard for authorized, read-only troubleshooting.
+                  Sessions expire after 10 minutes and are audited.
+                </p>
+              </div>
+
+              <UAlert
+                v-if="studentViewError"
+                color="error"
+                variant="subtle"
+                icon="i-lucide-circle-alert"
+                :description="studentViewError"
+              />
+
+              <div v-if="studentViewActiveSession" class="space-y-3">
+                <UAlert
+                  color="warning"
+                  variant="subtle"
+                  icon="i-lucide-eye"
+                  title="A Student View session is active"
+                  :description="`${studentViewActiveSession.student_name || studentViewActiveSession.student_email} · Expires ${new Date(studentViewActiveSession.expires_at).toLocaleString()}`"
+                />
+                <div class="flex flex-wrap gap-2">
+                  <UButton icon="i-lucide-eye" @click="resumeStudentView">
+                    Return to Student View
+                  </UButton>
+                  <UButton
+                    color="neutral"
+                    variant="outline"
+                    icon="i-lucide-log-out"
+                    :loading="studentViewEndBusy"
+                    @click="endStudentViewFromAdmin"
+                  >
+                    End Session
+                  </UButton>
+                </div>
+              </div>
+
+              <div v-else class="space-y-4">
+                <form
+                  class="flex flex-col gap-2 sm:flex-row"
+                  @submit.prevent="searchStudentViewStudents"
+                >
+                  <UInput
+                    v-model="studentViewSearchTerm"
+                    type="text"
+                    placeholder="Search by student's email"
+                    autocomplete="off"
+                    class="flex-1"
+                  />
+                  <UButton
+                    type="submit"
+                    icon="i-lucide-search"
+                    :loading="studentViewSearchBusy"
+                  >
+                    Search students
+                  </UButton>
+                </form>
+
+                <div v-if="studentViewResults.length" class="space-y-2">
+                  <p class="text-sm font-medium">Select the correct student</p>
+                  <button
+                    v-for="student in studentViewResults"
+                    :key="student.id"
+                    type="button"
+                    class="flex w-full flex-col rounded-lg border p-3 text-left transition-colors hover:bg-elevated"
+                    :class="studentViewSelectedStudent?.id === student.id ? 'border-primary bg-elevated' : 'border-default'"
+                    @click="selectStudentForView(student)"
+                  >
+                    <span class="font-medium">{{ student.name || "Student" }}</span>
+                    <span class="text-sm text-muted">{{ student.email }}</span>
+                  </button>
+                </div>
+
+                <div v-if="studentViewSelectedStudent" class="space-y-3 rounded-lg bg-elevated p-3">
+                  <p class="text-sm">
+                    Selected student:
+                    <strong>{{ studentViewSelectedStudent.name || "Student" }}</strong>
+                    ({{ studentViewSelectedStudent.email }})
+                  </p>
+
+                  <UTextarea
+                    v-model="studentViewReason"
+                    :rows="3"
+                    placeholder="Reason for troubleshooting (at least 10 characters)"
+                  />
+
+                  <UCheckbox
+                    v-model="studentViewAuthorized"
+                    label="The student has verbally authorized this troubleshooting session."
+                  />
+
+                  <p class="text-xs text-muted">
+                    Student View is read-only. Do not proceed without the student's authorization.
+                  </p>
+
+                  <UButton
+                    icon="i-lucide-eye"
+                    :loading="studentViewStartBusy"
+                    :disabled="!studentViewAuthorized || studentViewReason.trim().length < 10"
+                    @click="startStudentView"
+                  >
+                    Start Student View
+                  </UButton>
+                </div>
+              </div>
+            </section>
+
             <UPageGrid class="lg:grid-cols-4 gap-4 sm:gap-6 lg:gap-px">
               <StudentStatCard
                 title="STUDENTS"
@@ -157,7 +401,7 @@
                 rounded-class="rounded-lg xl:rounded-r-lg lg:rounded-r-lg lg:rounded-l-none"
               />
             </UPageGrid>
-       
+
             <div class="flex justify-end mb-2">
               <UButton
                 icon="i-lucide-users-round"

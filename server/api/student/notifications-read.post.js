@@ -3,8 +3,10 @@
 // Body: { notification_ids: string[] } or {} to mark all read
 import { createError } from 'h3'
 import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import { rejectStudentViewWrites } from '~/server/utils/studentView'
 
 export default defineEventHandler(async (event) => {
+  rejectStudentViewWrites(event)
   const supabase = await serverSupabaseClient(event)
   const user = await serverSupabaseUser(event)
 

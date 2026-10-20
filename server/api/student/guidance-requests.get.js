@@ -1,26 +1,12 @@
 import { createError } from 'h3'
-import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import { serverSupabaseClient } from '#supabase/server'
+import { resolveStudentViewContext } from '~/server/utils/studentView'
 
 export default defineEventHandler(async (event) => {
-  const client = await serverSupabaseClient(event)
-  const user = await serverSupabaseUser(event)
-
-  if (!user?.email) {
-    throw createError({ statusCode: 401, statusMessage: 'Not authenticated' })
-  }
-
-  const { data: student, error: studentError } = await client
-    .from('students')
-    .select('id')
-    .eq('email', user.email)
-    .maybeSingle()
-
-  if (studentError) {
-    throw createError({ statusCode: 500, statusMessage: studentError.message })
-  }
-  if (!student) {
-    return { data: [] }
-  }
+  const authenticatedClient = await serverSupabaseClient(event)
+  const context = await resolveStudentViewContext(event, authenticatedClient)
+  const client = context.dataClient
+  const student = context.student
 
   const { data, error } = await client
     .from('guidance_requests')
