@@ -315,10 +315,15 @@ const canEditSubmission = computed(() => {
     currentExaminerStatus.value === 'SUBMITTED' &&
     data.value?.regrading?.approved === true
 
+  const isReopenedCorrection =
+    currentExaminerStatus.value === 'SUBMITTED' &&
+    data.value?.isReopened === true &&
+    data.value?.regrading?.approved !== true
+
   return (
     currentExaminer.value?.isCurrent &&
     currentExaminer.value?.canEdit &&
-    (isDraft || isApprovedRegrading)
+    (isDraft || isApprovedRegrading || isReopenedCorrection)
   )
 })
 
@@ -411,7 +416,12 @@ async function handleSaveDraft() {
       },
     )
 
-    showSuccess('Draft saved')
+    showSuccess(
+      data.value?.isReopened &&
+      currentExaminerStatus.value === 'SUBMITTED'
+        ? 'Correction saved'
+        : 'Draft saved',
+    )
 
     await fetchAssessment()
 
@@ -475,9 +485,17 @@ async function handleSubmit() {
     return
   }
 
-  const confirmationMessage = isSubmission.value
-    ? 'Submit your Final Project Submission assessment? Once submitted, your grades become read-only unless an administrator approves a re-grading request.'
-    : 'Submit this assessment? Once submitted, grades become read-only and can only be changed if an admin reopens it.'
+  const isReopenedCorrection =
+    isSubmission.value &&
+    data.value?.isReopened === true &&
+    data.value?.regrading?.approved !== true &&
+    currentExaminerStatus.value === 'SUBMITTED'
+
+  const confirmationMessage = isReopenedCorrection
+    ? 'Submit your corrected Final Project Submission assessment? This finalizes your correction and closes the current reopening.'
+    : isSubmission.value
+      ? 'Submit your Final Project Submission assessment? Once submitted, your grades become read-only unless an administrator approves a re-grading request.'
+      : 'Submit this assessment? Once submitted, grades become read-only and can only be changed if an admin reopens it.'
 
   if (!confirm(confirmationMessage)) return
 
@@ -1333,6 +1351,23 @@ async function handleRequestRegrading() {
           </UCard>
 
 
+          <UAlert
+            v-if="
+              data?.isReopened &&
+              data?.regrading?.approved !== true &&
+              currentExaminerStatus === 'SUBMITTED' &&
+              currentExaminer?.isCurrent
+            "
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-unlock"
+            title="Submission reopened for correction"
+            :description="
+              `${data?.reopenReason ? `${data.reopenReason} ` : 'An administrator reopened this submission. '}` +
+              'Saving keeps the correction editable. Submitting finalizes it and closes the reopening.'
+            "
+          />
+
           <!-- Actions -->
           <div
             v-if="canEditSubmission"
@@ -1344,7 +1379,13 @@ async function handleRequestRegrading() {
               :loading="saving"
               @click="handleSaveDraft"
             >
-              Save Draft
+              {{
+                data?.isReopened &&
+                data?.regrading?.approved !== true &&
+                currentExaminerStatus === 'SUBMITTED'
+                  ? 'Save Correction'
+                  : 'Save Draft'
+              }}
             </UButton>
 
             <UButton

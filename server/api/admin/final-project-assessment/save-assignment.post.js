@@ -1,4 +1,4 @@
-import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import { serverSupabaseClient, serverSupabaseServiceRole, serverSupabaseUser } from '#supabase/server'
 import { createError, readBody } from 'h3'
 import { requireFinalProjectAdmin } from '~/server/utils/finalProjectAuth'
 import { getSeason4StatusForStudents } from '~/server/utils/finalProjectSeason4'
@@ -33,7 +33,9 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event)
   const studentIds = Array.isArray(body?.studentIds) ? body.studentIds.filter(Boolean) : []
-  const examinerIds = Array.isArray(body?.examinerIds) ? body.examinerIds.filter(Boolean) : []
+  const examinerIds = Array.isArray(body?.examinerIds)
+    ? [...new Set(body.examinerIds.filter(Boolean))]
+    : []
   const assessmentActivated = Boolean(body?.assessmentActivated)
   const season04Overrides = body?.season04Overrides || {}
 
@@ -45,124 +47,69 @@ export default defineEventHandler(async (event) => {
   }
 
   const season4Map = await getSeason4StatusForStudents(supabase, studentIds)
-  const nowIso = new Date().toISOString()
+  const serviceRole = await serverSupabaseServiceRole(event)
   const savedAssignments = []
 
-  // Sequential, not Promise.all -- these are writes with their own
-  // dependent inserts (assignment -> examiner links -> submissions),
-  // and keeping them sequential makes a partial-failure error message
-  // ("failed on student X") actually useful rather than an opaque
-  // batch failure.
+  // Keep calls sequential so partial failures identify the affected student.
   for (const studentId of studentIds) {
     const season4 = season4Map.get(studentId) || { isCompleted: false }
     const usingOverride = Boolean(season04Overrides[studentId]) && !season4.isCompleted
     const season04Confirmed = season4.isCompleted || usingOverride
 
-    // 1. Upsert the assignment itself.
-    const { data: assignment, error: assignmentError } = await supabase
-      .from('final_project_assignments')
-      .upsert(
-        {
-          student_id: studentId,
-          season04_confirmed: season04Confirmed,
-          season04_override: usingOverride,
-          season04_confirmed_by: adminUser.email,
-          season04_confirmed_at: nowIso,
-          assessment_activated: assessmentActivated,
-          activated_by: assessmentActivated ? adminUser.email : null,
-          activated_at: assessmentActivated ? nowIso : null,
-          archived: false, // re-saving un-archives, since Save implies "this is active again"
-          created_by: adminUser.email,
-        },
-        { onConflict: 'student_id' }
-      )
-      .select()
-      .single()
-
-    if (assignmentError) {
-      throw createError({ statusCode: 500, statusMessage: `Student ${studentId}: ${assignmentError.message}` })
-    }
-
-    // 2. Replace the examiner links for this assignment with the
-    // selected set. Simpler and more predictable than merging/diffing
-    // -- "Save" with a chosen examiner list means that's now the
-    // examiner list, not "add on top of whoever was there before."
-    const { error: deleteLinksError } = await supabase
-      .from('final_project_assignment_examiners')
-      .delete()
-      .eq('assignment_id', assignment.id)
-    if (deleteLinksError) {
-      throw createError({ statusCode: 500, statusMessage: deleteLinksError.message })
-    }
-
-    const { error: insertLinksError } = await supabase
-      .from('final_project_assignment_examiners')
-      .insert(
-        examinerIds.map((examinerId) => ({
-          assignment_id: assignment.id,
-          examiner_id: examinerId,
-          assigned_by: adminUser.email,
-        }))
-      )
-    if (insertLinksError) {
-      throw createError({ statusCode: 500, statusMessage: insertLinksError.message })
-    }
-
-    // 3. Ensure both submission rows exist, with status reflecting
-    // activation -- but ONLY when the current status hasn't moved past
-    // ASSIGNED yet (never touch IN_PROGRESS/SUBMITTED/ARCHIVED here).
-    for (const assessmentType of ['submission', 'presentation']) {
-      const { data: existingSubmission, error: existingError } = await supabase
-        .from('final_project_submissions')
-        .select('id, status')
-        .eq('assignment_id', assignment.id)
-        .eq('assessment_type', assessmentType)
-        .maybeSingle()
-
-      if (existingError) {
-        throw createError({ statusCode: 500, statusMessage: existingError.message })
-      }
-
-      const targetStatus = assessmentActivated ? 'ACTIVATED' : 'ASSIGNED'
-
-      if (!existingSubmission) {
-        const { error: insertSubError } = await supabase.from('final_project_submissions').insert({
-          assignment_id: assignment.id,
-          assessment_type: assessmentType,
-          status: targetStatus,
-        })
-        if (insertSubError) {
-          throw createError({ statusCode: 500, statusMessage: insertSubError.message })
-        }
-      } else if (['NOT_ASSIGNED', 'ASSIGNED', 'ACTIVATED'].includes(existingSubmission.status)) {
-        // Still safe to move between these three -- examiner hasn't
-        // started entering grades yet.
-        const { error: updateSubError } = await supabase
-          .from('final_project_submissions')
-          .update({ status: targetStatus })
-          .eq('id', existingSubmission.id)
-        if (updateSubError) {
-          throw createError({ statusCode: 500, statusMessage: updateSubError.message })
-        }
-      }
-      // else: IN_PROGRESS / SUBMITTED / ARCHIVED -- deliberately left untouched.
-    }
-
-    await supabase.from('audit_log').insert({
-      admin_email: adminUser.email,
-      action: 'final_project_assignment_saved',
-      entity_type: 'final_project_assignment',
-      entity_id: assignment.id,
-      details: {
-        studentId,
-        examinerIds,
-        assessmentActivated,
-        season04Confirmed,
-        season04Override: usingOverride,
+    const { data: rpcData, error: rpcError } = await serviceRole.rpc(
+      'save_final_project_assignment_atomic',
+      {
+        p_student_id: studentId,
+        p_examiner_ids: examinerIds,
+        p_season04_confirmed: season04Confirmed,
+        p_season04_override: usingOverride,
+        p_assessment_activated: assessmentActivated,
+        p_admin_email: adminUser.email,
       },
-    })
+    )
 
-    savedAssignments.push(assignment)
+    if (rpcError) {
+      const match = String(rpcError.message || '').match(
+        /FP_ASSIGNMENT_(INVALID|NOT_FOUND|FORBIDDEN|CONFLICT):\s*(.*)/s,
+      )
+
+      if (match) {
+        const statusCode = {
+          INVALID: 400,
+          NOT_FOUND: 404,
+          FORBIDDEN: 403,
+          CONFLICT: 409,
+        }[match[1]]
+
+        throw createError({
+          statusCode,
+          statusMessage: `Student ${studentId}: ${match[2].trim()}`,
+        })
+      }
+
+      console.error('Atomic final project assignment save failed:', {
+        studentId,
+        message: rpcError.message,
+        code: rpcError.code,
+      })
+      throw createError({
+        statusCode: 500,
+        statusMessage: `Student ${studentId}: Unable to save the final project assignment.`,
+      })
+    }
+
+    if (!rpcData?.assignment?.id || rpcData.assignment.student_id !== studentId) {
+      console.error('Atomic assignment RPC returned an unexpected result:', {
+        studentId,
+        rpcData,
+      })
+      throw createError({
+        statusCode: 500,
+        statusMessage: `Student ${studentId}: Assignment save returned an unexpected result.`,
+      })
+    }
+
+    savedAssignments.push(rpcData.assignment)
   }
 
   return { data: { assignments: savedAssignments } }

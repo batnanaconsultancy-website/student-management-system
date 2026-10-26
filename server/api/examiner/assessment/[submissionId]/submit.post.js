@@ -270,6 +270,16 @@ export default defineEventHandler(async (event) => {
   }
 
   const regradingApproved = regradingRequest?.status === 'APPROVED'
+  const isReopened = Boolean(
+    submission.status === 'SUBMITTED' &&
+    submission.reopened_at &&
+    submission.submitted_at &&
+    new Date(submission.reopened_at) > new Date(submission.submitted_at)
+  )
+  const isReopenedCorrection =
+    !regradingApproved &&
+    isReopened &&
+    ownAssessment?.status === 'SUBMITTED'
 
   /*
    * A submitted examiner assessment can only be resubmitted
@@ -277,7 +287,8 @@ export default defineEventHandler(async (event) => {
    */
   if (
     ownAssessment?.status === 'SUBMITTED' &&
-    !regradingApproved
+    !regradingApproved &&
+    !isReopenedCorrection
   ) {
     throw createError({
       statusCode: 403,
@@ -301,10 +312,13 @@ export default defineEventHandler(async (event) => {
 
   const regradingSubmissionStatusAllowed =
     regradingApproved && submission.status === 'SUBMITTED'
+  const reopenedSubmissionStatusAllowed =
+    isReopenedCorrection && submission.status === 'SUBMITTED'
 
   if (
     !normalSubmissionStatusAllowed &&
-    !regradingSubmissionStatusAllowed
+    !regradingSubmissionStatusAllowed &&
+    !reopenedSubmissionStatusAllowed
   ) {
     throw createError({
       statusCode: 400,
@@ -391,6 +405,414 @@ export default defineEventHandler(async (event) => {
       statusMessage:
         'Signature required. Type your full name before submitting.',
     })
+  }
+
+  /*
+   * Finalize an approved re-grading in one database transaction.
+   * Return immediately so the ordinary submission path cannot
+   * overwrite the original submission timestamps or repeat writes.
+   */
+  if (regradingApproved && regradingRequest) {
+    const adminClient = await serverSupabaseServiceRole(event)
+
+    const { data: rpcData, error: rpcError } = await adminClient.rpc(
+      'submit_final_project_regrading',
+      {
+        p_request_id: regradingRequest.id,
+        p_submission_id: submissionId,
+        p_examiner_id: examiner.id,
+        p_grades: grades,
+        p_signature_text: signatureText,
+        p_feedback: feedback,
+        p_recommendations: recommendations,
+      },
+    )
+
+    if (rpcError) {
+      const message = String(rpcError.message || '')
+      const match = message.match(
+        /FP_REGRADING_(INVALID|NOT_FOUND|FORBIDDEN|CONFLICT):\s*(.*)/s,
+      )
+
+      if (match) {
+        const statusCode = {
+          INVALID: 400,
+          NOT_FOUND: 404,
+          FORBIDDEN: 403,
+          CONFLICT: 409,
+        }[match[1]]
+
+        throw createError({
+          statusCode,
+          statusMessage:
+            match[2] || 'The re-grading assessment could not be submitted.',
+        })
+      }
+
+      console.error(
+        '[final-project-regrading-submit] RPC failed',
+        rpcError,
+      )
+
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Unable to submit the re-grading assessment.',
+      })
+    }
+
+    const hasValidResponse =
+      rpcData?.submitted === true &&
+      rpcData?.allExaminersSubmitted === true &&
+      rpcData?.examinerAverage !== null &&
+      rpcData?.examinerAverage !== undefined &&
+      typeof rpcData?.letterGrade === 'string' &&
+      typeof rpcData?.decision === 'string' &&
+      rpcData?.submittedExaminerCount !== null &&
+      rpcData?.submittedExaminerCount !== undefined &&
+      Number.isFinite(Number(rpcData.submittedExaminerCount)) &&
+      rpcData?.totalExaminerCount !== null &&
+      rpcData?.totalExaminerCount !== undefined &&
+      Number.isFinite(Number(rpcData.totalExaminerCount)) &&
+      rpcData?.overallAverage !== null &&
+      rpcData?.overallAverage !== undefined &&
+      typeof rpcData?.overallLetterGrade === 'string' &&
+      typeof rpcData?.overallDecision === 'string'
+
+    if (!hasValidResponse) {
+      console.error(
+        '[final-project-regrading-submit] Unexpected RPC response',
+        rpcData,
+      )
+
+      throw createError({
+        statusCode: 500,
+        statusMessage:
+          'The re-grading submission returned an unexpected result.',
+      })
+    }
+
+    /*
+     * The database transaction has committed at this point.
+     * Keep the existing administrator notification behavior.
+     */
+    await notifyAllAdmins(adminClient, {
+      type: 'final_project_assessment_submitted',
+      title: 'Final Project Submission assessment completed',
+      body:
+        `${assignment.student?.name || 'Student'} has received all ` +
+        `${rpcData.totalExaminerCount} examiner assessments. ` +
+        `Overall average: ${rpcData.overallAverage}. ` +
+        `Grade: ${rpcData.overallLetterGrade}. ` +
+        `Decision: ${rpcData.overallDecision}.`,
+      entityType: 'final_project_submission',
+      entityId: submissionId,
+    })
+
+    return {
+      data: rpcData,
+    }
+  }
+
+  /*
+   * Finalize an administrator-reopened correction through its own atomic
+   * RPC. Never route this path through the ordinary submit function, which
+   * can clear the shared submitted result when examiners are incomplete.
+   */
+  if (isReopenedCorrection) {
+    const adminClient = await serverSupabaseServiceRole(event)
+    const { data: rpcData, error: rpcError } = await adminClient.rpc(
+      'submit_final_project_reopened_submission',
+      {
+        p_submission_id: submissionId,
+        p_examiner_id: examiner.id,
+        p_grades: grades,
+        p_signature_text: signatureText,
+        p_feedback: feedback,
+        p_recommendations: recommendations,
+      },
+    )
+
+    if (rpcError) {
+      const message = String(rpcError.message || '')
+      const match = message.match(
+        /FP_REOPENED_SUBMISSION_SUBMIT_(INVALID|NOT_FOUND|FORBIDDEN|CONFLICT):\s*(.*)/s,
+      )
+
+      if (match) {
+        const statusCode = {
+          INVALID: 400,
+          NOT_FOUND: 404,
+          FORBIDDEN: 403,
+          CONFLICT: 409,
+        }[match[1]]
+
+        throw createError({
+          statusCode,
+          statusMessage: match[2] || 'The submission correction could not be finalized.',
+        })
+      }
+
+      console.error('[final-project-reopened-submit] RPC failed', rpcError)
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Unable to finalize the submission correction.',
+      })
+    }
+
+    const validCorrectionResponse =
+      rpcData?.submitted === true &&
+      rpcData?.correction === true &&
+      rpcData?.allExaminersSubmitted === true &&
+      Number.isFinite(Number(rpcData?.examinerAverage)) &&
+      typeof rpcData?.letterGrade === 'string' &&
+      typeof rpcData?.decision === 'string' &&
+      Number.isFinite(Number(rpcData?.submittedExaminerCount)) &&
+      Number.isFinite(Number(rpcData?.totalExaminerCount)) &&
+      Number.isFinite(Number(rpcData?.overallAverage)) &&
+      typeof rpcData?.overallLetterGrade === 'string' &&
+      typeof rpcData?.overallDecision === 'string'
+
+    if (!validCorrectionResponse) {
+      console.error('[final-project-reopened-submit] Unexpected RPC response', rpcData)
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'The correction returned an unexpected result.',
+      })
+    }
+
+    await notifyAllAdmins(adminClient, {
+      type: 'final_project_assessment_corrected',
+      title: 'Final Project Submission correction completed',
+      body:
+        `${examiner.name} finalized a correction for ` +
+        `${assignment.student?.name || 'the student'}. ` +
+        `Updated overall average: ${rpcData.overallAverage}. ` +
+        `Grade: ${rpcData.overallLetterGrade}. ` +
+        `Decision: ${rpcData.overallDecision}.`,
+      entityType: 'final_project_submission',
+      entityId: submissionId,
+    })
+
+    return { data: rpcData }
+  }
+
+  /*
+   * Submit an ordinary Submission assessment atomically.
+   * Approved re-grading returned through its separate RPC above.
+   */
+  if (!regradingApproved) {
+    const adminClient = await serverSupabaseServiceRole(event)
+
+    const { data: rpcData, error: rpcError } = await adminClient.rpc(
+      'submit_final_project_submission',
+      {
+        p_submission_id: submissionId,
+        p_examiner_id: examiner.id,
+        p_grades: grades,
+        p_signature_text: signatureText,
+        p_feedback: feedback,
+        p_recommendations: recommendations,
+      },
+    )
+
+    if (rpcError) {
+      const message = String(rpcError.message || '')
+      const match = message.match(
+        /FP_SUBMISSION_SUBMIT_(INVALID|NOT_FOUND|FORBIDDEN|CONFLICT):\s*(.*)/s,
+      )
+
+      if (match) {
+        const statusCode = {
+          INVALID: 400,
+          NOT_FOUND: 404,
+          FORBIDDEN: 403,
+          CONFLICT: 409,
+        }[match[1]]
+
+        throw createError({
+          statusCode,
+          statusMessage: match[2] || 'The assessment could not be submitted.',
+        })
+      }
+
+      console.error('[final-project-submit] RPC failed', rpcError)
+
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Unable to submit the assessment.',
+      })
+    }
+
+    const countsValid =
+      Number.isInteger(Number(rpcData?.submittedExaminerCount)) &&
+      Number.isInteger(Number(rpcData?.totalExaminerCount)) &&
+      Number(rpcData.totalExaminerCount) >= 1 &&
+      Number(rpcData.submittedExaminerCount) >= 1 &&
+      Number(rpcData.submittedExaminerCount) <= Number(rpcData.totalExaminerCount)
+
+    const commonResponseValid =
+      rpcData?.submitted === true &&
+      typeof rpcData?.allExaminersSubmitted === 'boolean' &&
+      rpcData?.examinerAverage !== null &&
+      rpcData?.examinerAverage !== undefined &&
+      Number.isFinite(Number(rpcData.examinerAverage)) &&
+      typeof rpcData?.letterGrade === 'string' &&
+      typeof rpcData?.decision === 'string' &&
+      countsValid
+
+    const overallResponseValid = rpcData?.allExaminersSubmitted
+      ? rpcData?.overallAverage !== null &&
+        rpcData?.overallAverage !== undefined &&
+        Number.isFinite(Number(rpcData.overallAverage)) &&
+        typeof rpcData?.overallLetterGrade === 'string' &&
+        typeof rpcData?.overallDecision === 'string'
+      : rpcData?.overallAverage === null &&
+        rpcData?.overallLetterGrade === null &&
+        rpcData?.overallDecision === null
+
+    if (!commonResponseValid || !overallResponseValid) {
+      console.error('[final-project-submit] Unexpected RPC response', rpcData)
+
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'The submission returned an unexpected result.',
+      })
+    }
+
+    if (rpcData.allExaminersSubmitted) {
+      await notifyAllAdmins(adminClient, {
+        type: 'final_project_assessment_submitted',
+        title: 'Final Project Submission assessment completed',
+        body:
+          `${assignment.student?.name || 'Student'} has received all ` +
+          `${rpcData.totalExaminerCount} examiner assessments. ` +
+          `Overall average: ${rpcData.overallAverage}. ` +
+          `Grade: ${rpcData.overallLetterGrade}. ` +
+          `Decision: ${rpcData.overallDecision}.`,
+        entityType: 'final_project_submission',
+        entityId: submissionId,
+      })
+    } else {
+      await notifyAllAdmins(adminClient, {
+        type: 'final_project_examiner_assessment_submitted',
+        title: 'Final Project Submission assessment received',
+        body:
+          `${examiner.name} submitted their assessment for ` +
+          `${assignment.student?.name || 'the student'}. ` +
+          `${rpcData.submittedExaminerCount} of ` +
+          `${rpcData.totalExaminerCount} assigned examiners have now submitted.`,
+        entityType: 'final_project_submission',
+        entityId: submissionId,
+      })
+    }
+
+    return { data: rpcData }
+  }
+
+  /*
+   * Preflight approved re-grading before the first grade write.
+   */
+  let adminClient = null
+  let regradingHistoryId = null
+
+  if (regradingApproved && regradingRequest) {
+    adminClient = await serverSupabaseServiceRole(event)
+
+    const { data: history, error: historyError } = await adminClient
+      .from('final_project_regrading_history')
+      .select('id, regrading_request_id, submission_id, examiner_id')
+      .eq('regrading_request_id', regradingRequest.id)
+      .maybeSingle()
+
+    if (historyError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: historyError.message,
+      })
+    }
+
+    if (
+      !history ||
+      history.regrading_request_id !== regradingRequest.id ||
+      history.submission_id !== submissionId ||
+      history.examiner_id !== examiner.id
+    ) {
+      throw createError({
+        statusCode: 409,
+        statusMessage:
+          'The approved re-grading request has no matching history record. No grades were submitted.',
+      })
+    }
+
+    regradingHistoryId = history.id
+
+    const { data: preflightRows, error: preflightRowsError } =
+      await adminClient
+        .from('final_project_assignment_examiners')
+        .select('examiner_id')
+        .eq('assignment_id', assignment.id)
+
+    if (preflightRowsError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: preflightRowsError.message,
+      })
+    }
+
+    const preflightIds = [...new Set(
+      (preflightRows || []).map(row => row.examiner_id).filter(Boolean),
+    )]
+
+    if (!preflightIds.length) {
+      throw createError({
+        statusCode: 409,
+        statusMessage: 'No examiners are assigned to this assessment.',
+      })
+    }
+
+    const { data: preflightAssessments, error: preflightAssessmentsError } =
+      await adminClient
+        .from('final_project_examiner_assessments')
+        .select('examiner_id, status')
+        .eq('submission_id', submissionId)
+        .in('examiner_id', preflightIds)
+
+    if (preflightAssessmentsError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: preflightAssessmentsError.message,
+      })
+    }
+
+    /*
+     * The current examiner may be DRAFT while editing an approved
+     * re-grading. All other assigned examiners must remain SUBMITTED.
+     */
+    if (!preflightIds.includes(examiner.id)) {
+      throw createError({
+        statusCode: 409,
+        statusMessage:
+          'You are not assigned to this assessment and cannot submit its re-grading.',
+      })
+    }
+
+    const submittedIds = new Set(
+      (preflightAssessments || [])
+        .filter(row => row.status === 'SUBMITTED')
+        .map(row => row.examiner_id),
+    )
+
+    const otherExaminersSubmitted = preflightIds
+      .filter(id => id !== examiner.id)
+      .every(id => submittedIds.has(id))
+
+    if (!otherExaminersSubmitted) {
+      throw createError({
+        statusCode: 409,
+        statusMessage:
+          'Re-grading cannot proceed because another assigned examiner assessment is not submitted. No grades were changed.',
+      })
+    }
   }
 
   /*
@@ -491,7 +913,7 @@ export default defineEventHandler(async (event) => {
    * shared completion check. RLS intentionally prevents an examiner
    * from reading other examiners' private assessment rows.
    */
-  const adminClient = await serverSupabaseServiceRole(event)
+  adminClient = adminClient || await serverSupabaseServiceRole(event)
 
   const { data: assignedRows, error: assignedError } =
     await adminClient
@@ -506,9 +928,11 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const assignedExaminerIds = (assignedRows || [])
-    .map((row) => row.examiner_id)
-    .filter(Boolean)
+  const assignedExaminerIds = [...new Set(
+    (assignedRows || [])
+      .map((row) => row.examiner_id)
+      .filter(Boolean),
+  )]
 
   if (!assignedExaminerIds.length) {
     throw createError({
@@ -674,39 +1098,32 @@ export default defineEventHandler(async (event) => {
         Number(grades[criterionId]),
       ]),
     )
-    const { data: history, error: historyError } = await adminClient
-      .from('final_project_regrading_history')
-      .select('id')
-      .eq('regrading_request_id', regradingRequest.id)
-      .maybeSingle()
-
-    if (historyError) {
+    if (!regradingHistoryId) {
       throw createError({
-        statusCode: 500,
-        statusMessage: historyError.message,
-      })
-    }
-
-    if (!history) {
-      throw createError({
-        statusCode: 500,
+        statusCode: 409,
         statusMessage:
-          'The approved re-grading history record could not be found.',
+          'The approved re-grading history was not validated before submission.',
       })
     }
 
-    const { error: historyUpdateError } = await adminClient
-      .from('final_project_regrading_history')
-      .update({
-        revised_grades: revisedGrades,
-        revised_average_grade: examinerAverage,
-        revised_letter_grade: examinerLetterGrade,
-        revised_decision: examinerDecision,
-        revised_feedback: feedback,
-        revised_recommendations: recommendations,
-        completed_at: submittedAt,
-      })
-      .eq('id', history.id)
+    const { data: updatedHistory, error: historyUpdateError } =
+      await adminClient
+        .from('final_project_regrading_history')
+        .update({
+          revised_grades: revisedGrades,
+          revised_average_grade: examinerAverage,
+          revised_letter_grade: examinerLetterGrade,
+          revised_decision: examinerDecision,
+          revised_feedback: feedback,
+          revised_recommendations: recommendations,
+          completed_at: submittedAt,
+        })
+        .eq('id', regradingHistoryId)
+        .eq('regrading_request_id', regradingRequest.id)
+        .eq('submission_id', submissionId)
+        .eq('examiner_id', examiner.id)
+        .select('id')
+        .maybeSingle()
 
     if (historyUpdateError) {
       throw createError({
@@ -715,20 +1132,39 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    const { error: regradingCompleteError } = await adminClient
-      .from('final_project_regrading_requests')
-      .update({
-        status: 'COMPLETED',
-        completed_at: submittedAt,
-        updated_at: submittedAt,
+    if (!updatedHistory) {
+      throw createError({
+        statusCode: 409,
+        statusMessage:
+          'The revised assessment history was not updated. The re-grading request was not marked completed.',
       })
-      .eq('id', regradingRequest.id)
-      .eq('status', 'APPROVED')
+    }
+
+    const { data: completedRequest, error: regradingCompleteError } =
+      await adminClient
+        .from('final_project_regrading_requests')
+        .update({
+          status: 'COMPLETED',
+          completed_at: submittedAt,
+          updated_at: submittedAt,
+        })
+        .eq('id', regradingRequest.id)
+        .eq('status', 'APPROVED')
+        .select('id')
+        .maybeSingle()
 
     if (regradingCompleteError) {
       throw createError({
         statusCode: 500,
         statusMessage: regradingCompleteError.message,
+      })
+    }
+
+    if (!completedRequest) {
+      throw createError({
+        statusCode: 409,
+        statusMessage:
+          'The re-grading request was not completed because it is no longer approved.',
       })
     }
   }

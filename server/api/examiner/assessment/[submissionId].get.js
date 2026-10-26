@@ -293,6 +293,12 @@ export default defineEventHandler(async (event) => {
 
   const regradingRequest = regradingRequestResult.data?.[0] || null
   const regradingApproved = regradingRequest?.status === 'APPROVED'
+  const isReopened = Boolean(
+    submission.status === 'SUBMITTED' &&
+    submission.reopened_at &&
+    submission.submitted_at &&
+    new Date(submission.reopened_at) > new Date(submission.submitted_at)
+  )
 
   const criteria = (criteriaResult.data || []).map((criterion) => ({
     id: criterion.id,
@@ -432,7 +438,7 @@ export default defineEventHandler(async (event) => {
           assessment.status === 'DRAFT' ||
           (
             assessment.status === 'SUBMITTED' &&
-            regradingApproved
+            (regradingApproved || isReopened)
           )
         ),
     }
@@ -481,7 +487,8 @@ export default defineEventHandler(async (event) => {
    */
   const isReadOnly =
     ownAssessment.status === 'SUBMITTED' &&
-    !regradingApproved
+    !regradingApproved &&
+    !isReopened
 
   const canEdit = examinerColumns.find(
     (item) => item.id === examiner.id,
@@ -510,6 +517,7 @@ export default defineEventHandler(async (event) => {
 
       isReadOnly,
       canEdit,
+      isReopened,
 
       regrading: {
         request: regradingRequest

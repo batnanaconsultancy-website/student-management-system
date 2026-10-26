@@ -1,4 +1,4 @@
-import { serverSupabaseClient } from '#supabase/server'
+import { serverSupabaseClient, serverSupabaseServiceRole } from '#supabase/server'
 import { createError, readBody } from 'h3'
 import { requireExaminerForSubmission } from '~/server/utils/finalProjectAuth'
 
@@ -228,6 +228,46 @@ export default defineEventHandler(async (event) => {
   }
 
   const regradingApproved = regradingRequest?.status === 'APPROVED'
+  const isReopened = Boolean(
+    submission.status === 'SUBMITTED' &&
+    submission.reopened_at &&
+    submission.submitted_at &&
+    new Date(submission.reopened_at) > new Date(submission.submitted_at)
+  )
+
+  /*
+   * An approved re-grading request must have its original history
+   * snapshot before any grade writes are allowed.
+   */
+  if (regradingApproved) {
+    const adminClient = await serverSupabaseServiceRole(event)
+
+    const { data: history, error: historyError } = await adminClient
+      .from('final_project_regrading_history')
+      .select('id, regrading_request_id, submission_id, examiner_id')
+      .eq('regrading_request_id', regradingRequest.id)
+      .maybeSingle()
+
+    if (historyError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: historyError.message,
+      })
+    }
+
+    if (
+      !history ||
+      history.regrading_request_id !== regradingRequest.id ||
+      history.submission_id !== submissionId ||
+      history.examiner_id !== examiner.id
+    ) {
+      throw createError({
+        statusCode: 409,
+        statusMessage:
+          'The approved re-grading request has no matching history record. No grades were saved.',
+      })
+    }
+  }
 
   /*
    * A submitted assessment can only be edited when an administrator
@@ -235,7 +275,8 @@ export default defineEventHandler(async (event) => {
    */
   if (
     existingAssessment?.status === 'SUBMITTED' &&
-    !regradingApproved
+    !regradingApproved &&
+    !isReopened
   ) {
     throw createError({
       statusCode: 403,
@@ -299,6 +340,205 @@ export default defineEventHandler(async (event) => {
   }
 
   /*
+   * Save feedback and recommendations.
+   */
+  const feedback =
+    body?.feedback !== undefined && body?.feedback !== null
+      ? String(body.feedback)
+      : ''
+
+  const recommendations =
+    body?.recommendations !== undefined &&
+    body?.recommendations !== null
+      ? String(body.recommendations)
+      : ''
+
+  /*
+   * Save an approved re-grading draft atomically. The RPC owns all
+   * writes for this path so a failed save cannot leave partial changes.
+   * Ordinary draft saves continue through the existing code below.
+   */
+  if (regradingApproved) {
+    const adminClient = await serverSupabaseServiceRole(event)
+
+    const { data: rpcData, error: rpcError } = await adminClient.rpc(
+      'save_final_project_regrading_draft',
+      {
+        p_request_id: regradingRequest.id,
+        p_submission_id: submissionId,
+        p_examiner_id: examiner.id,
+        p_grades: grades,
+        p_feedback: feedback,
+        p_recommendations: recommendations,
+        p_signature_text: signatureText || null,
+      },
+    )
+
+    if (rpcError) {
+      const message = String(rpcError.message || '')
+      const match = message.match(
+        /FP_REGRADING_(INVALID|NOT_FOUND|FORBIDDEN|CONFLICT):\s*(.*)/s,
+      )
+
+      if (match) {
+        const statusCode = {
+          INVALID: 400,
+          NOT_FOUND: 404,
+          FORBIDDEN: 403,
+          CONFLICT: 409,
+        }[match[1]]
+
+        throw createError({
+          statusCode,
+          statusMessage: match[2] || 'The re-grading draft could not be saved.',
+        })
+      }
+
+      console.error(
+        '[final-project-regrading-draft-save] RPC failed',
+        rpcError,
+      )
+
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Unable to save the re-grading draft.',
+      })
+    }
+
+    if (rpcData?.saved !== true || rpcData?.status !== 'DRAFT') {
+      console.error(
+        '[final-project-regrading-draft-save] Unexpected RPC response',
+        rpcData,
+      )
+
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'The re-grading draft save returned an unexpected result.',
+      })
+    }
+
+    return {
+      data: rpcData,
+    }
+  }
+
+  /*
+   * An administrator-reopened Submission is corrected atomically without
+   * demoting the examiner assessment or clearing the shared result.
+   * Approved re-grading retains precedence through its dedicated RPC above.
+   */
+  if (isReopened && existingAssessment?.status === 'SUBMITTED') {
+    const adminClient = await serverSupabaseServiceRole(event)
+    const { data: rpcData, error: rpcError } = await adminClient.rpc(
+      'save_final_project_reopened_submission_draft',
+      {
+        p_submission_id: submissionId,
+        p_examiner_id: examiner.id,
+        p_grades: grades,
+        p_feedback: feedback,
+        p_recommendations: recommendations,
+        p_signature_text: signatureText || null,
+      },
+    )
+
+    if (rpcError) {
+      const message = String(rpcError.message || '')
+      const match = message.match(
+        /FP_REOPENED_SUBMISSION_SAVE_(INVALID|NOT_FOUND|FORBIDDEN|CONFLICT):\s*(.*)/s,
+      )
+
+      if (match) {
+        const statusCode = {
+          INVALID: 400,
+          NOT_FOUND: 404,
+          FORBIDDEN: 403,
+          CONFLICT: 409,
+        }[match[1]]
+
+        throw createError({
+          statusCode,
+          statusMessage: match[2] || 'The correction could not be saved.',
+        })
+      }
+
+      console.error('[final-project-reopened-save] RPC failed', rpcError)
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Unable to save the submission correction.',
+      })
+    }
+
+    if (rpcData?.saved !== true || rpcData?.status !== 'SUBMITTED') {
+      console.error('[final-project-reopened-save] Unexpected RPC response', rpcData)
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'The correction save returned an unexpected result.',
+      })
+    }
+
+    return { data: rpcData }
+  }
+
+  /*
+   * Save an ordinary Submission draft atomically.
+   * Approved re-grading returned through its separate RPC above.
+   */
+  if (!regradingApproved) {
+    const adminClient = await serverSupabaseServiceRole(event)
+
+    const { data: rpcData, error: rpcError } = await adminClient.rpc(
+      'save_final_project_submission_draft',
+      {
+        p_submission_id: submissionId,
+        p_examiner_id: examiner.id,
+        p_grades: grades,
+        p_feedback: feedback,
+        p_recommendations: recommendations,
+        p_signature_text: signatureText || null,
+      },
+    )
+
+    if (rpcError) {
+      const message = String(rpcError.message || '')
+      const match = message.match(
+        /FP_SUBMISSION_DRAFT_(INVALID|NOT_FOUND|FORBIDDEN|CONFLICT):\s*(.*)/s,
+      )
+
+      if (match) {
+        const statusCode = {
+          INVALID: 400,
+          NOT_FOUND: 404,
+          FORBIDDEN: 403,
+          CONFLICT: 409,
+        }[match[1]]
+
+        throw createError({
+          statusCode,
+          statusMessage: match[2] || 'The draft could not be saved.',
+        })
+      }
+
+      console.error('[final-project-draft-save] RPC failed', rpcError)
+
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Unable to save the assessment draft.',
+      })
+    }
+
+    if (rpcData?.saved !== true || rpcData?.status !== 'DRAFT') {
+      console.error('[final-project-draft-save] Unexpected RPC response', rpcData)
+
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'The draft save returned an unexpected result.',
+      })
+    }
+
+    return { data: rpcData }
+  }
+
+  /*
    * Save the logged-in examiner's grades.
    */
   for (const [criterionId, grade] of Object.entries(grades)) {
@@ -327,20 +567,6 @@ export default defineEventHandler(async (event) => {
       })
     }
   }
-
-  /*
-   * Save feedback and recommendations.
-   */
-  const feedback =
-    body?.feedback !== undefined && body?.feedback !== null
-      ? String(body.feedback)
-      : ''
-
-  const recommendations =
-    body?.recommendations !== undefined &&
-    body?.recommendations !== null
-      ? String(body.recommendations)
-      : ''
 
   /*
    * Create or update the current examiner's assessment row.

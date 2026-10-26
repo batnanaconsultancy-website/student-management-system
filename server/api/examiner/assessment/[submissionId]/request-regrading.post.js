@@ -44,137 +44,61 @@ export default defineEventHandler(async (event) => {
   );
 
   /*
-   * The shared submission must exist and must already be submitted.
+   * The database RPC performs the authoritative checks and inserts the
+   * request atomically, including protection against duplicate pending
+   * requests and concurrent request-number allocation.
    */
-  const { data: submission, error: submissionError } = await supabase
-    .from("final_project_submissions")
-    .select("id, assignment_id, assessment_type, status")
-    .eq("id", submissionId)
-    .maybeSingle();
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    "create_final_project_regrading_request",
+    {
+      p_submission_id: submissionId,
+      p_examiner_id: examiner.id,
+      p_reason: reason,
+    },
+  );
 
-  if (submissionError) {
+  if (rpcError) {
+    const message = String(rpcError.message || "");
+    const match = message.match(
+      /^FP_REGRADING_(INVALID|NOT_FOUND|FORBIDDEN|CONFLICT):(.*)$/s,
+    );
+
+    if (match) {
+      const statusByCode = {
+        INVALID: 400,
+        NOT_FOUND: 404,
+        FORBIDDEN: 403,
+        CONFLICT: 409,
+      };
+
+      throw createError({
+        statusCode: statusByCode[match[1]],
+        statusMessage: match[2].trim() || "The re-grading request could not be created.",
+      });
+    }
+
+    console.error("Failed to create final project re-grading request:", rpcError);
     throw createError({
       statusCode: 500,
-      statusMessage: submissionError.message,
+      statusMessage: "The re-grading request could not be created.",
     });
   }
 
-  if (!submission) {
-    throw createError({
-      statusCode: 404,
-      statusMessage: "Submission not found.",
-    });
-  }
+  const request = rpcData?.request;
 
-  if (submission.assessment_type !== "submission") {
-    throw createError({
-      statusCode: 400,
-      statusMessage:
-        "Re-grading requests are only available for Final Project Submission assessments.",
-    });
-  }
-
-  /*
-   * The examiner must have a submitted assessment of their own.
-   */
-  const { data: ownAssessment, error: assessmentError } = await supabase
-    .from("final_project_examiner_assessments")
-    .select("id, status, average_grade, letter_grade, decision")
-    .eq("submission_id", submissionId)
-    .eq("examiner_id", examiner.id)
-    .maybeSingle();
-
-  if (assessmentError) {
+  if (
+    !request?.id ||
+    request.request_number == null ||
+    request.status !== "PENDING"
+  ) {
+    console.error("Re-grading request RPC returned an unexpected response.");
     throw createError({
       statusCode: 500,
-      statusMessage: assessmentError.message,
+      statusMessage: "The re-grading request could not be created.",
     });
   }
 
-  if (!ownAssessment) {
-    throw createError({
-      statusCode: 404,
-      statusMessage: "Your examiner assessment was not found.",
-    });
-  }
-
-  if (ownAssessment.status !== "SUBMITTED") {
-    throw createError({
-      statusCode: 400,
-      statusMessage: "Your assessment has not been submitted yet.",
-    });
-  }
-
-  /*
-   * Do not allow another request while one is already awaiting
-   * an administrator's decision.
-   */
-  const { data: pendingRequest, error: pendingError } = await supabase
-    .from("final_project_regrading_requests")
-    .select("id, request_number, status")
-    .eq("submission_id", submissionId)
-    .eq("examiner_id", examiner.id)
-    .eq("status", "PENDING")
-    .maybeSingle();
-
-  if (pendingError) {
-    throw createError({
-      statusCode: 500,
-      statusMessage: pendingError.message,
-    });
-  }
-
-  if (pendingRequest) {
-    throw createError({
-      statusCode: 409,
-      statusMessage: `Re-grading request #${pendingRequest.request_number} is already pending administrator review.`,
-    });
-  }
-
-  /*
-   * Find the next request number for this examiner and submission.
-   */
-  const { data: previousRequests, error: previousRequestsError } =
-    await supabase
-      .from("final_project_regrading_requests")
-      .select("request_number")
-      .eq("submission_id", submissionId)
-      .eq("examiner_id", examiner.id)
-      .order("request_number", { ascending: false })
-      .limit(1);
-
-  if (previousRequestsError) {
-    throw createError({
-      statusCode: 500,
-      statusMessage: previousRequestsError.message,
-    });
-  }
-
-  const requestNumber = previousRequests?.length
-    ? Number(previousRequests[0].request_number) + 1
-    : 1;
-
-  /*
-   * Create the re-grading request.
-   */
-  const { data: request, error: requestError } = await supabase
-    .from("final_project_regrading_requests")
-    .insert({
-      submission_id: submissionId,
-      examiner_id: examiner.id,
-      request_number: requestNumber,
-      reason,
-      status: "PENDING",
-    })
-    .select("id, request_number, status, reason, created_at")
-    .single();
-
-  if (requestError) {
-    throw createError({
-      statusCode: 500,
-      statusMessage: requestError.message,
-    });
-  }
+  const requestNumber = request.request_number;
 
   /*
    * Notify every administrator through the existing Admin Inbox.
