@@ -29,3 +29,7 @@ logs
 !package-lock.json
 !tsconfig.json
 google-oauth-client.json
+
+# Qwasar-to-SIS mapping registries (safe to version-control)
+!config/qwasar_project_mapping_candidates.json
+!config/qwasar_project_mappings.json
