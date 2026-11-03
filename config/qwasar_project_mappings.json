@@ -1,0 +1,8 @@
+{
+  "title": "Approved Qwasar-to-SIS Project Mappings",
+  "schema_version": 1,
+  "generated_at": "2026-11-02T13:12:39.526616+00:00",
+  "approval_policy": "Only explicitly approved mappings may be used for SIS credit.",
+  "mapping_count": 0,
+  "mappings": []
+}

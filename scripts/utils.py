@@ -38,11 +38,17 @@ class SupabaseClient:
         if self.role_key:
             self.service_client = create_client(self.url, self.role_key)
         else:
-            self.service_client = self.client
+            self.service_client = None
     
     def get_client(self, service_role=False):
-        """Get Supabase client (regular or service role)"""
-        return self.service_client if service_role else self.client
+        """Get Supabase client (regular or service role)."""
+        if service_role:
+            if self.service_client is None:
+                raise ValueError(
+                    "SUPABASE_ROLE_KEY is required for service-role access."
+                )
+            return self.service_client
+        return self.client
 
 def get_supabase_client(service_role=False):
     """Get configured Supabase client instance"""

@@ -13,6 +13,7 @@ import time
 import re
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 # Import our utilities
 from utils import (
@@ -29,6 +30,13 @@ from utils import (
 # status calculations) reads the is_completed / current_season_id values
 # this script writes to the database.
 SEASON_COMPLETION_THRESHOLD_PCT = 75
+
+QWASAR_BASE_URL = "https://upskill.us.qwasar.io"
+
+QWASAR_PROJECT_LINK_PATTERN = re.compile(
+    r"/tracks/([^/]+)/track_users/([^/]+)/projects/([^/?#]+)"
+)
+
 
 class QwasarScraper:
     """Handles web scraping from Qwasar platform"""
@@ -221,6 +229,77 @@ class QwasarScraper:
             traceback.print_exc()
             return []
     
+    def extract_qwasar_project_observations(self, html_content, username):
+        """
+        Extract structured project identities from a Qwasar student profile.
+
+        Completion status is determined by the containing profile section.
+        Project identity is determined by the project URL, not its display name.
+        This method is read-only and does not award SIS project credit.
+        """
+        soup = BeautifulSoup(html_content, "html.parser")
+
+        sections = []
+
+        for heading in soup.find_all("h2"):
+            heading_text = heading.get_text(" ", strip=True).casefold()
+
+            if "projects completed" in heading_text:
+                status = "COMPLETED"
+            elif "projects in progress" in heading_text:
+                status = "IN_PROGRESS"
+            else:
+                continue
+
+            container = heading.find_parent("div", class_="col-span-full")
+
+            if container:
+                sections.append((container, status))
+
+        observations = []
+        seen = set()
+
+        for container, status in sections:
+            for link in container.find_all("a", href=True):
+                href = link.get("href", "").strip()
+                match = QWASAR_PROJECT_LINK_PATTERN.search(href)
+
+                if not match:
+                    continue
+
+                track_slug, track_user_id, project_slug = match.groups()
+                project_name = link.get_text(" ", strip=True)
+
+                if not project_name:
+                    continue
+
+                project_url = urljoin(QWASAR_BASE_URL, href)
+
+                identity_key = (
+                    track_slug,
+                    track_user_id,
+                    project_slug,
+                    status,
+                    project_url,
+                )
+
+                if identity_key in seen:
+                    continue
+
+                seen.add(identity_key)
+
+                observations.append({
+                    "username": username,
+                    "track_slug": track_slug,
+                    "track_user_id": track_user_id,
+                    "project_slug": project_slug,
+                    "project_name": project_name,
+                    "project_url": project_url,
+                    "completion_status": status,
+                })
+
+        return observations
+
     def extract_student_data(self, html_content, student_id):
         """Extract data from a student's profile page using original working logic"""
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -233,6 +312,9 @@ class QwasarScraper:
             'last_login': data.get('last_log_in', 'N/A'),
             'ongoing_projects': data.get('ongoing_projects', []),
             'completed_projects': data.get('completed_projects', []),
+            'qwasar_project_observations': self.extract_qwasar_project_observations(
+                html_content, student_id
+            ),
             'exercises_completed': data.get('exercises_completed'),
             'points': data.get('points'),
             'season_progress': data.get('seasons', {})
@@ -969,79 +1051,373 @@ class StudentDataProcessor:
             traceback.print_exc()
 
 class ProjectCompletionProcessor:
-    """Handles project completion data updates"""
-    
-    def __init__(self, supabase_client):
+    """
+    Applies Qwasar project observations using explicitly approved mappings.
+
+    Candidate mappings and legacy display-name matching are never used to
+    award SIS project credit.
+    """
+
+    REQUIRED_MAPPING_FIELDS = (
+        "mapping_id",
+        "program_id",
+        "track_slug",
+        "season_id",
+        "project_slug",
+        "sis_project_id",
+        "approval_status",
+    )
+
+    VALID_STATUSES = {"COMPLETED", "IN_PROGRESS"}
+
+    def __init__(self, supabase_client, registry_path=None):
         self.supabase = supabase_client
-        self.student_id_map = get_student_id_map(supabase_client)
-        self.project_id_map = get_project_id_map(supabase_client)
-    
-    # Projects that appear in multiple seasons and should be marked complete across all
-    MULTI_SEASON_PROJECTS = {"My Css Is Easy I", "My Levenshtein", "My Cat"}
+
+        if registry_path is None:
+            registry_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..",
+                "config",
+                "qwasar_project_mappings.json",
+            )
+
+        self.registry_path = os.path.abspath(registry_path)
+        self.mappings = self._load_approved_mappings()
+
+    def _load_approved_mappings(self):
+        """Load and strictly validate the approved mapping registry."""
+        try:
+            with open(self.registry_path, "r", encoding="utf-8") as handle:
+                registry = json.load(handle)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"Cannot load approved Qwasar mapping registry: {exc}"
+            ) from exc
+
+        if not isinstance(registry, dict):
+            raise ValueError("Approved Qwasar registry must be a JSON object.")
+
+        if registry.get("schema_version") != 1:
+            raise ValueError("Unsupported approved Qwasar registry schema.")
+
+        mappings = registry.get("mappings")
+        if not isinstance(mappings, list):
+            raise ValueError("Approved Qwasar registry must contain a mappings list.")
+
+        if registry.get("mapping_count") != len(mappings):
+            raise ValueError(
+                "Approved Qwasar registry mapping_count does not match mappings."
+            )
+
+        validated = {}
+        mapping_ids = set()
+        target_projects = {}
+
+        for index, mapping in enumerate(mappings, start=1):
+            if not isinstance(mapping, dict):
+                raise ValueError(f"Approved mapping {index} must be an object.")
+
+            for field in self.REQUIRED_MAPPING_FIELDS:
+                value = mapping.get(field)
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(
+                        f"Approved mapping {index} has an invalid {field}."
+                    )
+
+            if mapping["approval_status"] != "APPROVED":
+                raise ValueError(
+                    f"Mapping {mapping['mapping_id']} is not marked APPROVED."
+                )
+
+            approval = mapping.get("approval")
+            if not isinstance(approval, dict):
+                raise ValueError(
+                    f"Mapping {mapping['mapping_id']} has no approval record."
+                )
+
+            approved_by = approval.get("approved_by")
+            if not isinstance(approved_by, str) or not approved_by.strip():
+                raise ValueError(
+                    f"Mapping {mapping['mapping_id']} has an invalid approval.approved_by."
+                )
+
+            approved_at = approval.get("approved_at")
+            try:
+                parsed_approved_at = datetime.fromisoformat(
+                    approved_at.replace("Z", "+00:00")
+                ) if isinstance(approved_at, str) else None
+            except ValueError:
+                parsed_approved_at = None
+
+            if (
+                parsed_approved_at is None
+                or parsed_approved_at.tzinfo is None
+                or parsed_approved_at.utcoffset() is None
+            ):
+                raise ValueError(
+                    f"Mapping {mapping['mapping_id']} has an invalid approval.approved_at."
+                )
+
+            mapping_id = mapping["mapping_id"]
+            if mapping_id in mapping_ids:
+                raise ValueError(f"Duplicate approved mapping ID: {mapping_id}")
+            mapping_ids.add(mapping_id)
+
+            identity = (
+                mapping["program_id"],
+                mapping["track_slug"],
+                mapping["project_slug"],
+            )
+
+            if identity in validated:
+                raise ValueError(
+                    f"Duplicate approved Qwasar identity: {identity}"
+                )
+
+            target = (
+                mapping["sis_project_id"],
+                mapping["season_id"],
+            )
+            previous_target = target_projects.get(identity)
+
+            if previous_target is not None and previous_target != target:
+                raise ValueError(
+                    f"Conflicting approved targets for Qwasar identity: {identity}"
+                )
+
+            target_projects[identity] = target
+            validated[identity] = mapping
+
+        return validated
+
+    @staticmethod
+    def _response_rows(response, description):
+        rows = getattr(response, "data", None)
+        if not isinstance(rows, list):
+            raise RuntimeError(
+                f"Database returned invalid data while loading {description}."
+            )
+        return rows
+
+    def _fetch_rows(self, table, columns):
+        response = self.supabase.from_(table).select(columns).execute()
+        return self._response_rows(response, table)
 
     def update_project_completion(self, scraped_data):
-        """Update student project completion data"""
-        print_step("PROJECT COMPLETION", "Updating student project completion status")
+        """Apply approved Qwasar observations without weakening existing credit."""
+        print_step(
+            "PROJECT COMPLETION",
+            "Updating project completion from approved Qwasar mappings",
+        )
 
-        records_dict = {}
+        if not self.mappings:
+            print(
+                "No approved Qwasar mappings exist. "
+                "No SIS project completion records will be changed."
+            )
+            return False
 
-        for student_data in scraped_data:
-            username = student_data.get("name")
-            if not username or username not in self.student_id_map:
+        if not isinstance(scraped_data, list):
+            raise ValueError("Scraped student data must be a list.")
+
+        student_records = [
+            item for item in scraped_data
+            if isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+            and item.get("name").strip()
+            and isinstance(item.get("qwasar_project_observations"), list)
+        ]
+
+        if not student_records:
+            print("No structured Qwasar project observations were found.")
+            return False
+
+        students = self._fetch_rows(
+            "students",
+            "id, username, program_id",
+        )
+
+        students_by_username = {}
+        for student in students:
+            username = student.get("username")
+            if username:
+                if username in students_by_username:
+                    raise RuntimeError(
+                        f"Duplicate SIS student username: {username}"
+                    )
+                students_by_username[username] = student
+
+        relevant_observations = []
+        relevant_student_ids = set()
+        relevant_project_ids = set()
+        relevant_season_ids = set()
+
+        for student_data in student_records:
+            username = student_data["name"]
+            student = students_by_username.get(username)
+
+            if not student:
                 continue
 
-            student_id = self.student_id_map[username]
+            program_id = student.get("program_id")
+            student_id = student.get("id")
 
-            # Process completed projects first (these take priority)
-            for project_name in student_data.get("completed_projects", []):
-                project_ids = self.project_id_map.get(project_name, [])
+            if not program_id or not student_id:
+                continue
 
-                # For multi-season projects, mark ALL IDs as completed
-                # For regular projects, just use the first ID
-                if project_name in self.MULTI_SEASON_PROJECTS:
-                    ids_to_mark = project_ids
-                else:
-                    ids_to_mark = project_ids[:1] if project_ids else []
+            for observation in student_data["qwasar_project_observations"]:
+                if not isinstance(observation, dict):
+                    continue
 
-                for project_id in ids_to_mark:
-                    key = (student_id, project_id)
-                    records_dict[key] = {
-                        "student_id": student_id,
-                        "project_id": project_id,
-                        "is_completed": True,
-                        # "completion_date": datetime.now().date().isoformat(),
-                        "completed_at": datetime.now().date().isoformat()
-                    }
+                if observation.get("username") not in (None, username):
+                    continue
 
-            # Process ongoing projects (only if not already completed)
-            for project_name in student_data.get("ongoing_projects", []):
-                project_ids = self.project_id_map.get(project_name, [])
+                track_slug = observation.get("track_slug")
+                project_slug = observation.get("project_slug")
+                status = observation.get("completion_status")
 
-                # For multi-season projects, mark ALL IDs
-                # For regular projects, just use the first ID
-                if project_name in self.MULTI_SEASON_PROJECTS:
-                    ids_to_mark = project_ids
-                else:
-                    ids_to_mark = project_ids[:1] if project_ids else []
+                if not all(
+                    isinstance(value, str) and value.strip()
+                    for value in (track_slug, project_slug, status)
+                ):
+                    continue
 
-                for project_id in ids_to_mark:
-                    key = (student_id, project_id)
-                    if key not in records_dict:
-                        records_dict[key] = {
-                            "student_id": student_id,
-                            "project_id": project_id,
-                            "is_completed": False,
-                            # "completion_date": None
-                        }
+                if status not in self.VALID_STATUSES:
+                    continue
 
-        records_to_upsert = list(records_dict.values())
+                identity = (program_id, track_slug, project_slug)
+                mapping = self.mappings.get(identity)
 
-        if records_to_upsert:
-            safe_upsert(self.supabase, 'student_project_completion', records_to_upsert,
-                       on_conflict="student_id, project_id")
-            safe_print(f"[OK] Updated {len(records_to_upsert)} project completion records")
-        else:
-            print("No project completion records to update")
+                if not mapping:
+                    continue
+
+                relevant_observations.append(
+                    (student_id, student, mapping, status)
+                )
+                relevant_student_ids.add(student_id)
+                relevant_project_ids.add(mapping["sis_project_id"])
+                relevant_season_ids.add(mapping["season_id"])
+
+        if not relevant_observations:
+            print("No observations matched an approved mapping and SIS student.")
+            return False
+
+        projects = self._fetch_rows(
+            "projects",
+            "id, program_id, season_id",
+        )
+        seasons = self._fetch_rows(
+            "seasons",
+            "id, program_id",
+        )
+
+        projects_by_id = {}
+        for project in projects:
+            project_id = project.get("id")
+            if project_id in relevant_project_ids:
+                if project_id in projects_by_id:
+                    raise RuntimeError(
+                        f"Duplicate SIS project ID: {project_id}"
+                    )
+                projects_by_id[project_id] = project
+
+        seasons_by_id = {}
+        for season in seasons:
+            season_id = season.get("id")
+            if season_id in relevant_season_ids:
+                if season_id in seasons_by_id:
+                    raise RuntimeError(
+                        f"Duplicate SIS season ID: {season_id}"
+                    )
+                seasons_by_id[season_id] = season
+
+        # Validate every approved mapping against the live SIS catalogue.
+        eligible = {}
+
+        for student_id, student, mapping, status in relevant_observations:
+            project_id = mapping["sis_project_id"]
+            season_id = mapping["season_id"]
+            program_id = mapping["program_id"]
+
+            project = projects_by_id.get(project_id)
+            season = seasons_by_id.get(season_id)
+
+            if not project or not season:
+                continue
+
+            if student.get("program_id") != program_id:
+                continue
+
+            if project.get("program_id") != program_id:
+                continue
+
+            if project.get("season_id") != season_id:
+                continue
+
+            if season.get("program_id") != program_id:
+                continue
+
+            key = (student_id, project_id)
+
+            # COMPLETED always takes precedence within this scrape batch.
+            if key not in eligible or status == "COMPLETED":
+                eligible[key] = status
+
+        if not eligible:
+            print(
+                "No observations passed student, project and season "
+                "programme validation."
+            )
+            return False
+
+        records_for_rpc = [
+            {
+                "student_id": student_id,
+                "project_id": project_id,
+                "status": status,
+            }
+            for (student_id, project_id), status in sorted(eligible.items())
+        ]
+
+        try:
+            response = self.supabase.rpc(
+                "apply_qwasar_project_completion_batch",
+                {"p_records": records_for_rpc},
+            ).execute()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Atomic Qwasar completion update failed: {exc}"
+            ) from exc
+
+        changed_count = getattr(response, "data", None)
+        if not isinstance(changed_count, int) or isinstance(changed_count, bool):
+            raise RuntimeError(
+                "Atomic Qwasar completion RPC returned an invalid result."
+            )
+
+        safe_print(
+            "[OK] Atomic Qwasar completion batch processed: "
+            f"{len(records_for_rpc)} records; {changed_count} rows changed."
+        )
+        return True
+
+
+def prepare_public_student_data(scraped_data):
+    """Remove internal Qwasar observations before publishing student JSON."""
+    if not isinstance(scraped_data, list):
+        return scraped_data
+
+    return [
+        {
+            key: value
+            for key, value in record.items()
+            if key != "qwasar_project_observations"
+        }
+        if isinstance(record, dict)
+        else record
+        for record in scraped_data
+    ]
+
 
 def main():
     """Main function with CLI argument parsing"""
@@ -1078,8 +1454,9 @@ def main():
             json_path = os.path.join(script_dir, '..', 'public', 'student_grades.json')
             os.makedirs(os.path.dirname(json_path), exist_ok=True)
             
+            public_scraped_data = prepare_public_student_data(scraped_data)
             with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(scraped_data, f, indent=2, ensure_ascii=False)
+                json.dump(public_scraped_data, f, indent=2, ensure_ascii=False)
             safe_print(f"[OK] Saved scraped data to {json_path}")
         else:
             scraped_data = load_scraped_data()
