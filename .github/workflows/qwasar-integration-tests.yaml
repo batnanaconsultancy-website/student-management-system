@@ -1,0 +1,66 @@
+name: Qwasar Integration Tests
+
+on:
+  push:
+    branches:
+      - deploy/qwasar-completion-integration
+    paths:
+      - "scripts/data_processor.py"
+      - "scripts/utils.py"
+      - "tests/test_qwasar_project_*.py"
+      - "config/qwasar_project_mappings.json"
+      - "migrations/2026-11-02-atomic-qwasar-project-completion.sql"
+      - "requirements.txt"
+      - ".github/workflows/qwasar-integration-tests.yaml"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/data_processor.py"
+      - "scripts/utils.py"
+      - "tests/test_qwasar_project_*.py"
+      - "config/qwasar_project_mappings.json"
+      - "migrations/2026-11-02-atomic-qwasar-project-completion.sql"
+      - "requirements.txt"
+      - ".github/workflows/qwasar-integration-tests.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  qwasar-tests:
+    name: Qwasar Extraction and Completion Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check Python syntax
+        run: |
+          python -m py_compile \
+            scripts/data_processor.py \
+            scripts/utils.py \
+            tests/test_qwasar_project_completion_processor.py \
+            tests/test_qwasar_project_extraction.py
+
+      - name: Run Qwasar tests
+        run: |
+          python -m unittest discover \
+            -s tests \
+            -p "test_qwasar_project_*.py" \
+            -v
