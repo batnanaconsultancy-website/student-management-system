@@ -1129,9 +1129,33 @@ class ProjectCompletionProcessor:
                     f"Mapping {mapping['mapping_id']} is not marked APPROVED."
                 )
 
-            if not isinstance(mapping.get("approval"), dict):
+            approval = mapping.get("approval")
+            if not isinstance(approval, dict):
                 raise ValueError(
                     f"Mapping {mapping['mapping_id']} has no approval record."
+                )
+
+            approved_by = approval.get("approved_by")
+            if not isinstance(approved_by, str) or not approved_by.strip():
+                raise ValueError(
+                    f"Mapping {mapping['mapping_id']} has an invalid approval.approved_by."
+                )
+
+            approved_at = approval.get("approved_at")
+            try:
+                parsed_approved_at = datetime.fromisoformat(
+                    approved_at.replace("Z", "+00:00")
+                ) if isinstance(approved_at, str) else None
+            except ValueError:
+                parsed_approved_at = None
+
+            if (
+                parsed_approved_at is None
+                or parsed_approved_at.tzinfo is None
+                or parsed_approved_at.utcoffset() is None
+            ):
+                raise ValueError(
+                    f"Mapping {mapping['mapping_id']} has an invalid approval.approved_at."
                 )
 
             mapping_id = mapping["mapping_id"]
@@ -1378,6 +1402,23 @@ class ProjectCompletionProcessor:
         return True
 
 
+def prepare_public_student_data(scraped_data):
+    """Remove internal Qwasar observations before publishing student JSON."""
+    if not isinstance(scraped_data, list):
+        return scraped_data
+
+    return [
+        {
+            key: value
+            for key, value in record.items()
+            if key != "qwasar_project_observations"
+        }
+        if isinstance(record, dict)
+        else record
+        for record in scraped_data
+    ]
+
+
 def main():
     """Main function with CLI argument parsing"""
     parser = argparse.ArgumentParser(description='Process student data from Qwasar platform')
@@ -1413,8 +1454,9 @@ def main():
             json_path = os.path.join(script_dir, '..', 'public', 'student_grades.json')
             os.makedirs(os.path.dirname(json_path), exist_ok=True)
             
+            public_scraped_data = prepare_public_student_data(scraped_data)
             with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(scraped_data, f, indent=2, ensure_ascii=False)
+                json.dump(public_scraped_data, f, indent=2, ensure_ascii=False)
             safe_print(f"[OK] Saved scraped data to {json_path}")
         else:
             scraped_data = load_scraped_data()

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from data_processor import ProjectCompletionProcessor
+from data_processor import ProjectCompletionProcessor, prepare_public_student_data
 
 
 PROGRAM_ID = "program-1"
@@ -129,6 +129,31 @@ class FakeClient:
         return FakeRPC(self, name, params)
 
 
+class TestPublicStudentDataPreparation(unittest.TestCase):
+    def test_removes_qwasar_observations_without_mutating_scraped_data(self):
+        observations = [{
+            "project_slug": "project-a",
+            "completion_status": "COMPLETED",
+        }]
+        scraped_data = [{
+            "name": "student-one",
+            "points": 100,
+            "qwasar_project_observations": observations,
+        }]
+
+        public_data = prepare_public_student_data(scraped_data)
+
+        self.assertEqual(public_data, [{
+            "name": "student-one",
+            "points": 100,
+        }])
+        self.assertIsNot(public_data, scraped_data)
+        self.assertEqual(
+            scraped_data[0]["qwasar_project_observations"],
+            observations,
+        )
+
+
 class TestApprovedQwasarProjectCompletionProcessor(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -214,6 +239,35 @@ class TestApprovedQwasarProjectCompletionProcessor(unittest.TestCase):
             ProjectCompletionProcessor(
                 self.client, registry_path=self.registry_path
             )
+
+    def test_rejects_missing_approval_identity(self):
+        mapping = approved_mapping()
+        mapping["approval"]["approved_by"] = "   "
+        self.write_registry([mapping])
+
+        with self.assertRaisesRegex(ValueError, "approval.approved_by"):
+            ProjectCompletionProcessor(
+                self.client, registry_path=self.registry_path
+            )
+
+    def test_rejects_invalid_or_timezone_naive_approval_timestamp(self):
+        invalid_timestamps = [
+            "not-a-timestamp",
+            "2026-10-01T00:00:00",
+        ]
+
+        for timestamp in invalid_timestamps:
+            with self.subTest(timestamp=timestamp):
+                mapping = approved_mapping()
+                mapping["approval"]["approved_at"] = timestamp
+                self.write_registry([mapping])
+
+                with self.assertRaisesRegex(
+                    ValueError, "approval.approved_at"
+                ):
+                    ProjectCompletionProcessor(
+                        self.client, registry_path=self.registry_path
+                    )
 
     def test_rejects_duplicate_identity(self):
         mapping = approved_mapping()
