@@ -13,7 +13,7 @@ concurrency:
 jobs:
   inspect-sheet:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
@@ -29,111 +29,275 @@ jobs:
           python -m pip install --upgrade pip
           pip install gspread google-auth
 
-      - name: Inspect Bachelor's attendance worksheets
+      - name: Audit Bachelor's attendance worksheets
         env:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
         run: |
           python - <<'PY'
           import json
           import os
+          import re
+          from collections import Counter
+          from datetime import datetime
+          from hashlib import sha256
 
           import gspread
           from google.oauth2.service_account import Credentials
 
-          spreadsheet_id = "1LQum-XZSTaun1cJ7AHxjS63JLGzMPFpCWEAES6gNZTg"
-          candidate_gids = {334409729, 394749220}
+          SPREADSHEET_ID = "1LQum-XZSTaun1cJ7AHxjS63JLGzMPFpCWEAES6gNZTg"
+          CANDIDATE_GIDS = {334409729, 394749220}
+
+          EMAIL_HEADER = "Please enter your Amsterdam Tech email address"
+          TIMESTAMP_HEADER = "Timestamp"
+          DATE_HEADER = "What date was the session you attended?"
+          TYPE_HEADER = "Which session is this form for?"
+          LIVE_HEADER = "Did you attend this session live?"
+
+          def parse_date(value):
+              value = (value or "").strip()
+              if not value:
+                  return None
+              for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                  try:
+                      return datetime.strptime(value, fmt).date()
+                  except ValueError:
+                      pass
+              return None
+
+          def parse_timestamp(value):
+              value = (value or "").strip()
+              if not value:
+                  return None
+              for fmt in (
+                  "%d/%m/%Y %H:%M:%S",
+                  "%d/%m/%Y %H:%M",
+                  "%Y-%m-%d %H:%M:%S",
+                  "%Y-%m-%dT%H:%M:%S",
+                  "%Y-%m-%dT%H:%M:%S.%f",
+              ):
+                  try:
+                      return datetime.strptime(value, fmt)
+                  except ValueError:
+                      pass
+              try:
+                  return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(
+                      tzinfo=None
+                  )
+              except ValueError:
+                  return None
+
+          def cell(row, index):
+              return row[index].strip() if index < len(row) else ""
+
+          def normalized_type(value):
+              value = " ".join((value or "").casefold().split())
+              aliases = {
+                  "mentoring": "Mentoring",
+                  "squad meeting": "Squad Meeting",
+                  "stand-up": "Stand-up",
+                  "stand up": "Stand-up",
+                  "standup": "Stand-up",
+                  "workshop": "Workshop",
+                  "workshops": "Workshop",
+              }
+              return aliases.get(value, value)
+
+          def normalized_live(value):
+              value = " ".join((value or "").casefold().split())
+              value = value.replace("–", "-").replace("—", "-")
+              if value == "yes":
+                  return "Yes"
+              if value.startswith("no") and "approved" in value and "exceptional" in value:
+                  return "No - approved exceptional circumstances"
+              if not value:
+                  return "Blank"
+              return "Other"
 
           raw_credentials = os.environ.get("GOOGLE_CREDENTIALS_JSON")
           if not raw_credentials:
               raise RuntimeError("GOOGLE_CREDENTIALS_JSON secret is missing.")
 
-          info = json.loads(raw_credentials)
-
-          scopes = [
-              "https://www.googleapis.com/auth/spreadsheets.readonly",
-          ]
-
           credentials = Credentials.from_service_account_info(
-              info,
-              scopes=scopes,
+              json.loads(raw_credentials),
+              scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
           )
-          gc = gspread.authorize(credentials)
+          spreadsheet = gspread.authorize(credentials).open_by_key(SPREADSHEET_ID)
 
-          spreadsheet = gc.open_by_key(spreadsheet_id)
+          print("Spreadsheet:", spreadsheet.title)
+          print("Candidate worksheet GIDs:", sorted(CANDIDATE_GIDS))
 
-          print("Spreadsheet title:", spreadsheet.title)
-          print("Candidate worksheet GIDs:", sorted(candidate_gids))
+          audits = {}
 
-          worksheets = spreadsheet.worksheets()
-
-          for ws in worksheets:
-              print("\n===== WORKSHEET =====")
-              print("Title:", ws.title)
-              print("GID:", ws.id)
-              print("Rows:", ws.row_count)
-              print("Columns:", ws.col_count)
-              print("Candidate GID match:", ws.id in candidate_gids)
-
-              if ws.id not in candidate_gids:
-                  print(
-                      "Skipping worksheet contents; "
-                      "not a Bachelor's attendance candidate."
-                  )
+          for ws in spreadsheet.worksheets():
+              if ws.id not in CANDIDATE_GIDS:
+                  print(f"Metadata only: {ws.title} (GID {ws.id})")
                   continue
 
+              print(f"\n===== AUDIT: {ws.title} | GID {ws.id} =====")
               values = ws.get_all_values()
-
               if not values:
-                  print("No data.")
+                  print("Worksheet is empty.")
+                  audits[ws.id] = set()
                   continue
 
-              headers = values[0]
-              print("Headers:", headers)
+              headers = [h.strip() for h in values[0]]
 
-              date_indexes = [
-                  i for i, header in enumerate(headers)
-                  if any(
-                      word in header.lower()
-                      for word in ("date", "timestamp", "time")
-                  )
+              required = {
+                  "timestamp": TIMESTAMP_HEADER,
+                  "email": EMAIL_HEADER,
+                  "date": DATE_HEADER,
+                  "type": TYPE_HEADER,
+              }
+              indexes = {}
+              for key, header in required.items():
+                  matches = [i for i, value in enumerate(headers) if value == header]
+                  if len(matches) != 1:
+                      raise RuntimeError(
+                          f"{ws.title}: expected exactly one '{header}' header; "
+                          f"found {len(matches)}."
+                      )
+                  indexes[key] = matches[0]
+
+              live_matches = [
+                  i for i, value in enumerate(headers) if value == LIVE_HEADER
               ]
-
-              type_indexes = [
-                  i for i, header in enumerate(headers)
-                  if any(
-                      word in header.lower()
-                      for word in ("session", "type", "activity")
+              if len(live_matches) > 1:
+                  raise RuntimeError(
+                      f"{ws.title}: found multiple '{LIVE_HEADER}' headers."
                   )
-              ]
 
-              if not date_indexes and len(headers) > 1:
+              indexes["live"] = live_matches[0] if live_matches else None
+              print(
+                  "Live-attendance column:",
+                  f"present at column {indexes['live'] + 1}"
+                  if indexes["live"] is not None
+                  else "unavailable in this worksheet"
+              )
+
+              print("Data rows:", max(0, len(values) - 1))
+              print("Using exact headers; no fuzzy column matching.")
+
+              date_counts = Counter()
+              type_counts = Counter()
+              live_counts = Counter()
+              missing_email = 0
+              invalid_email = 0
+              missing_date = 0
+              invalid_date = 0
+              missing_timestamp = 0
+              invalid_timestamp = 0
+              missing_type = 0
+              unknown_types = Counter()
+              valid_dates = []
+              signatures = []
+
+              for row in values[1:]:
+                  if not any((value or "").strip() for value in row):
+                      continue
+
+                  email = cell(row, indexes["email"]).casefold()
+                  session_date_raw = cell(row, indexes["date"])
+                  timestamp_raw = cell(row, indexes["timestamp"])
+                  session_type_raw = cell(row, indexes["type"])
+                  live_raw = (
+                      cell(row, indexes["live"])
+                      if indexes["live"] is not None
+                      else None
+                  )
+
+                  if not email:
+                      missing_email += 1
+                  elif not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+                      invalid_email += 1
+
+                  if not session_date_raw:
+                      missing_date += 1
+                      session_date = None
+                  else:
+                      session_date = parse_date(session_date_raw)
+                      if session_date is None:
+                          invalid_date += 1
+                      else:
+                          valid_dates.append(session_date)
+
+                  if not timestamp_raw:
+                      missing_timestamp += 1
+                      timestamp = None
+                  else:
+                      timestamp = parse_timestamp(timestamp_raw)
+                      if timestamp is None:
+                          invalid_timestamp += 1
+
+                  if not session_type_raw:
+                      missing_type += 1
+                      session_type = ""
+                  else:
+                      session_type = normalized_type(session_type_raw)
+                      if session_type not in {
+                          "Mentoring", "Squad Meeting", "Stand-up", "Workshop"
+                      }:
+                          unknown_types[session_type_raw.strip()] += 1
+
+                  if session_type:
+                      type_counts[session_type] += 1
+
+                  if indexes["live"] is not None:
+                      live_counts[normalized_live(live_raw)] += 1
+
+                  # A complete signature includes submission timestamp as well as
+                  # normalized email, actual session date, and session type.
+                  # This avoids collapsing two same-day sessions by one student.
+                  email_is_valid = bool(
+                      re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
+                  )
+
+                  if email_is_valid and session_date and timestamp and session_type:
+                      signature = (
+                          email,
+                          session_date.isoformat(),
+                          session_type.casefold(),
+                          timestamp.isoformat(),
+                      )
+                      signatures.append(
+                          sha256("|".join(signature).encode("utf-8")).hexdigest()
+                      )
+
+              signature_set = set(signatures)
+              audits[ws.id] = signature_set
+
+              print("Session date range:",
+                    min(valid_dates).isoformat() if valid_dates else "Unavailable",
+                    "to",
+                    max(valid_dates).isoformat() if valid_dates else "Unavailable")
+              print("Missing session dates:", missing_date)
+              print("Invalid session dates:", invalid_date)
+              print("Missing student emails:", missing_email)
+              print("Invalid-format student emails:", invalid_email)
+              print("Missing submission timestamps:", missing_timestamp)
+              print("Invalid submission timestamps:", invalid_timestamp)
+              print("Missing session types:", missing_type)
+              print("Counts by session type:", dict(sorted(type_counts.items())))
+              print("Unexpected session types:", dict(unknown_types))
+              if indexes["live"] is None:
+                  print("Live-attendance responses: Column unavailable")
+              else:
                   print(
-                      "No date-like header found. "
-                      "Inspecting column B as a documented candidate."
+                      "Live-attendance responses:",
+                      dict(sorted(live_counts.items()))
                   )
-                  date_indexes = [1]
+              print("Rows with complete deduplication signatures:", len(signatures))
+              print("Duplicate signatures within this worksheet:",
+                    len(signatures) - len(signature_set))
 
-              for index in date_indexes:
-                  header = headers[index] if index < len(headers) else ""
-                  samples = [
-                      row[index]
-                      for row in values[1:]
-                      if len(row) > index and row[index].strip()
-                  ]
+          first_gid, second_gid = sorted(CANDIDATE_GIDS)
+          first = audits.get(first_gid, set())
+          second = audits.get(second_gid, set())
 
-                  print("Date column:", index + 1, repr(header))
-                  print("Date samples:", samples[:8])
-
-              for index in type_indexes:
-                  header = headers[index]
-                  distinct = sorted({
-                      row[index].strip()
-                      for row in values[1:]
-                      if len(row) > index and row[index].strip()
-                  })
-
-                  print("Session type column:", index + 1, repr(header))
-                  print("Distinct session types:", distinct[:30])
-
-          print("\nInspection completed. No records were modified.")
+          print("\n===== CROSS-WORKSHEET COMPARISON =====")
+          print(f"Worksheet GID {first_gid} complete signatures:", len(first))
+          print(f"Worksheet GID {second_gid} complete signatures:", len(second))
+          print("Matching signatures across both worksheets:", len(first & second))
+          print("Unique signatures across both worksheets:", len(first | second))
+          print("No emails, free-text responses, or raw row contents were printed.")
+          print("No database was accessed and no records were modified.")
           PY
