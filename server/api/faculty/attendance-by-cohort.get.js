@@ -7,7 +7,7 @@ export default defineEventHandler(async (event) => {
 
   await requireFaculty(event, client);
 
-  const { data: students, error: studentsError } = await client.from("students")
+  const { data: students, error: studentsError } = await client.from("assessment_student_profiles")
     .select(`
       cohort_id,
       workshops_attended,

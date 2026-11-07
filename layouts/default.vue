@@ -69,13 +69,27 @@ const mainLinks: NavigationMenuItem[] = [
     ],
   },
   {
-    label: "Final Project Assessment",
-    to: "/admin/final-project-assessment",
-    ariaLabel: "Final Project Assessment",
+    label: "Assessment Management",
     icon: "i-lucide-clipboard-check",
+    ariaLabel: "Assessment Management",
+    defaultOpen: false,
+    to: "/admin/assessment-management",
+    type: "trigger",
     tooltip: {
-      text: "Final Project Assessment",
+      text: "Manage student assessment evidence and decisions",
     },
+    children: [
+      {
+        label: "Student Assessment",
+        description: "Review evidence portfolios and formal assessment decisions.",
+        to: "/admin/assessment-management",
+      },
+      {
+        label: "Final Project Assessment",
+        description: "Manage Final Project assignments, examiners and assessment history.",
+        to: "/admin/final-project-assessment",
+      },
+    ],
   },
   {
     label: "Analytics",

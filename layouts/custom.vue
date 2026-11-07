@@ -71,12 +71,12 @@
       },
     },
     {
-      label: "Final Project Assessment",
-      to: "/students/final-project-assessment",
-      ariaLabel: "Final Project Assessment",
+      label: "Student Assessment",
+      to: "/students/assessment",
+      ariaLabel: "Student Assessment",
       icon: "i-lucide-clipboard-check",
       tooltip: {
-        text: "Final Project Assessment",
+        text: "View your assessment evidence and progress",
       },
     },
     {

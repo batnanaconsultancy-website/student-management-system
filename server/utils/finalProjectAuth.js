@@ -136,7 +136,7 @@ export async function requireExaminerForSubmission(
   const { data: submission, error: submissionError } = await supabase
     .from("final_project_submissions")
     .select(
-      "*, final_project_assignments ( *, students ( id, first_name, last_name, email, program_id, cohort_id ) )",
+      "*, final_project_assignments ( * )",
     )
     .eq("id", submissionId)
     .maybeSingle();

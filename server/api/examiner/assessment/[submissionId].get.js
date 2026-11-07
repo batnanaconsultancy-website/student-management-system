@@ -37,6 +37,36 @@ export default defineEventHandler(async (event) => {
   const { examiner, submission, assignment } =
     await requireExaminerForSubmission(event, supabase, submissionId)
 
+  // Retrieve only student profiles assigned to this authenticated examiner.
+  const { data: studentProfiles, error: studentProfileError } = await supabase
+    .rpc('get_final_project_examiner_student_profiles')
+
+  if (studentProfileError) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: studentProfileError.message,
+    })
+  }
+
+  const studentProfile = (studentProfiles || []).find(
+    (profile) => profile.id === assignment.student_id,
+  ) || null
+
+  if (!studentProfile) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'You are not authorised to view this student profile.',
+    })
+  }
+
+  const student = {
+    id: studentProfile.id,
+    name: `${studentProfile.first_name || ''} ${studentProfile.last_name || ''}`.trim(),
+    email: studentProfile.email,
+    program: studentProfile.program_name || null,
+    cohort: studentProfile.cohort_name || null,
+  }
+
   /*
    * ------------------------------------------------------------
    * PRESENTATION
@@ -137,7 +167,7 @@ export default defineEventHandler(async (event) => {
         assessmentActivated: ['ACTIVATED', 'IN_PROGRESS', 'SUBMITTED'].includes(
           submission.status,
         ),
-        student: assignment.student || null,
+        student,
         examiner: {
           id: examiner.id,
           name: examiner.name,
@@ -544,7 +574,7 @@ export default defineEventHandler(async (event) => {
         'SUBMITTED',
       ].includes(submission.status),
 
-      student: assignment.student || null,
+      student,
 
       examiner: {
         id: examiner.id,

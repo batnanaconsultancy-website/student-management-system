@@ -55,6 +55,7 @@ export async function getActiveStudentViewSession(event) {
     )
     .eq('id', sessionId)
     .eq('status', 'active')
+    .eq('student_authorized', true)
     .eq('admin_email', user.email)
     .gt('expires_at', new Date().toISOString())
     .is('ended_at', null)

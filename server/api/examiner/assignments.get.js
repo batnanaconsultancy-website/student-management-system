@@ -28,8 +28,7 @@ export default defineEventHandler(async (event) => {
   const { data, error } = await supabase
     .from('final_project_assignments')
     .select(`
-      id, assessment_activated, archived,
-      students ( id, first_name, last_name, email, programs ( name ), cohorts ( name ) ),
+      id, student_id, assessment_activated, archived,
       final_project_submissions ( id, assessment_type, status, average_grade, submitted_at )
     `)
     .in('id', assignmentIds)
@@ -40,19 +39,45 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: error.message })
   }
 
+  const studentIds = [...new Set((data || []).map((row) => row.student_id).filter(Boolean))]
+
+  if (studentIds.length === 0) {
+    return { data: { assignments: [] } }
+  }
+
+  const { data: profiles, error: profilesError } = await supabase
+    .rpc('get_final_project_examiner_student_profiles')
+
+  if (profilesError) {
+    throw createError({ statusCode: 500, statusMessage: profilesError.message })
+  }
+
+  const profileByStudentId = new Map(
+    (profiles || []).map((profile) => [profile.id, profile]),
+  )
+
+  if ((data || []).some((row) => !profileByStudentId.has(row.student_id))) {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'One or more assigned student profiles are not accessible.',
+    })
+  }
+
   const assignments = (data || []).map((row) => {
     const submission = row.final_project_submissions?.find((s) => s.assessment_type === 'submission') || null
     const presentation = row.final_project_submissions?.find((s) => s.assessment_type === 'presentation') || null
+    const profile = profileByStudentId.get(row.student_id) || null
+
     return {
       assignmentId: row.id,
       assessmentActivated: row.assessment_activated,
-      student: row.students
+      student: profile
         ? {
-            id: row.students.id,
-            name: `${row.students.first_name || ''} ${row.students.last_name || ''}`.trim(),
-            email: row.students.email,
-            program: row.students.programs?.name || null,
-            cohort: row.students.cohorts?.name || null,
+            id: profile.id,
+            name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
+            email: profile.email,
+            program: profile.program_name || null,
+            cohort: profile.cohort_name || null,
           }
         : null,
       submission: submission && {

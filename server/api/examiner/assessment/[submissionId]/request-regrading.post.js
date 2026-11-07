@@ -1,4 +1,4 @@
-import { serverSupabaseServiceRole } from "#supabase/server";
+import { serverSupabaseClient, serverSupabaseServiceRole } from "#supabase/server";
 import { createError, getRouterParam, readBody } from "h3";
 import { requireExaminerForSubmission } from "~/server/utils/finalProjectAuth";
 import { notifyAllAdmins } from "~/server/utils/finalProjectAssessment";
@@ -12,6 +12,18 @@ export default defineEventHandler(async (event) => {
       statusMessage: "Submission ID is required.",
     });
   }
+
+  /*
+   * Authenticate and verify the examiner's assignment using the
+   * session-bound client before obtaining service-role access.
+   */
+  const userClient = await serverSupabaseClient(event);
+
+  const { examiner } = await requireExaminerForSubmission(
+    event,
+    userClient,
+    submissionId,
+  );
 
   const body = await readBody(event);
   const reason = String(body?.reason || "").trim();
@@ -30,18 +42,8 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  /*
-   * Verify that the logged-in user is an assigned examiner for this
-   * submission.
-   */
-
+  // The RPC is restricted to service_role.
   const supabase = await serverSupabaseServiceRole(event);
-
-  const { examiner } = await requireExaminerForSubmission(
-    event,
-    supabase,
-    submissionId,
-  );
 
   /*
    * The database RPC performs the authoritative checks and inserts the

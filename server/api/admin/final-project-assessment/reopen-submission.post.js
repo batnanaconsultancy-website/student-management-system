@@ -1,70 +1,118 @@
-import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import {
+  serverSupabaseClient,
+  serverSupabaseServiceRole,
+} from '#supabase/server'
 import { createError, readBody } from 'h3'
 import { requireFinalProjectAdmin } from '~/server/utils/finalProjectAuth'
 
 // POST /api/admin/final-project-assessment/reopen-submission
 //
 // Section 19's controlled correction flow:
-//   Request Correction -> Admin Review -> Reopen Assessment -> Examiner Edits -> Resubmit
-// This endpoint IS the "Reopen Assessment" step (the "Request
-// Correction" and "Admin Review" steps are conversations that happen
-// outside the system -- an examiner emailing/messaging an admin, say
-// -- this is where that conversation results in an actual action).
+// Request Correction -> Admin Review -> Reopen Assessment -> Examiner Edits -> Resubmit.
 //
-// Does NOT change status away from SUBMITTED -- the examiner-facing
-// endpoints already treat a submission as editable again once
-// reopened_at is newer than submitted_at (see
-// requireExaminerForSubmission / the form page's isReadOnly check),
-// so status staying "SUBMITTED" while reopened_at advances is
-// deliberate, not a bug: it's what makes "this was submitted, then
-// reopened" distinguishable from "never submitted" in the data itself.
+// This endpoint performs the actual reopen action after the admin's review.
+// The reopen and audit-log entries are committed in one database transaction.
+//
+// The submission deliberately remains SUBMITTED. Examiner endpoints permit
+// editing when reopened_at is newer than submitted_at, distinguishing a
+// reopened assessment from one that has never been submitted.
 //
 // Body: { submissionId, reason }
 export default defineEventHandler(async (event) => {
   const supabase = await serverSupabaseClient(event)
-  await requireFinalProjectAdmin(event, supabase)
-  const adminUser = await serverSupabaseUser(event)
+
+  let adminUser
+
+  try {
+    adminUser = await requireFinalProjectAdmin(event, supabase)
+  } catch (error) {
+    const message = String(error?.statusMessage || error?.message || '')
+
+    if (message === 'Auth session missing!') {
+      throw createError({
+        statusCode: 401,
+        statusMessage: 'Not authenticated',
+      })
+    }
+
+    throw error
+  }
 
   const body = await readBody(event)
-  const submissionId = body?.submissionId
+  const submissionId = String(body?.submissionId || '').trim()
   const reason = String(body?.reason || '').trim()
 
-  if (!submissionId) {
-    throw createError({ statusCode: 400, statusMessage: 'submissionId is required' })
+  const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  if (!uuidPattern.test(submissionId)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'A valid submissionId is required.',
+    })
   }
+
   if (!reason) {
-    throw createError({ statusCode: 400, statusMessage: 'A reason is required so the examiner knows what to fix.' })
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'A reason is required so the examiner knows what to fix.',
+    })
   }
 
-  const { data: submission, error: fetchError } = await supabase
-    .from('final_project_submissions')
-    .select('id, status, assignment_id')
-    .eq('id', submissionId)
-    .maybeSingle()
-
-  if (fetchError) throw createError({ statusCode: 500, statusMessage: fetchError.message })
-  if (!submission) throw createError({ statusCode: 404, statusMessage: 'Submission not found' })
-  if (submission.status !== 'SUBMITTED') {
-    throw createError({ statusCode: 400, statusMessage: 'Only a submitted assessment can be reopened.' })
+  if (reason.length > 2000) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'The reason must be 2000 characters or fewer.',
+    })
   }
 
-  const nowIso = new Date().toISOString()
-  const { data: updated, error: updateError } = await supabase
-    .from('final_project_submissions')
-    .update({ reopened_by: adminUser.email, reopened_at: nowIso, reopen_reason: reason })
-    .eq('id', submissionId)
-    .select()
-    .single()
+  const adminClient = await serverSupabaseServiceRole(event)
+  const { data, error } = await adminClient.rpc(
+    'reopen_final_project_submission',
+    {
+      p_submission_id: submissionId,
+      p_admin_email: adminUser.email,
+      p_reason: reason,
+    },
+  )
 
-  if (updateError) throw createError({ statusCode: 500, statusMessage: updateError.message })
+  if (error) {
+    const message = String(error.message || '')
+    const match = message.match(
+      /FP_REOPEN_SUBMISSION_(INVALID|NOT_FOUND|FORBIDDEN|CONFLICT):\s*(.*)/s,
+    )
 
-  await supabase.from('audit_log').insert({
-    admin_email: adminUser.email,
-    action: 'final_project_submission_reopened',
-    entity_type: 'final_project_submission',
-    entity_id: submissionId,
-    details: { reason, assignmentId: submission.assignment_id },
-  })
+    if (match) {
+      const statusCode = {
+        INVALID: 400,
+        NOT_FOUND: 404,
+        FORBIDDEN: 403,
+        CONFLICT: 409,
+      }[match[1]]
 
-  return { data: { submission: updated } }
+      throw createError({
+        statusCode,
+        statusMessage: match[2] || 'The submission could not be reopened.',
+      })
+    }
+
+    throw createError({
+      statusCode: 500,
+      statusMessage: 'The submission could not be reopened.',
+    })
+  }
+
+  if (!data?.submission || !data?.auditId) {
+    throw createError({
+      statusCode: 500,
+      statusMessage:
+        'The reopen transaction returned an incomplete result. Check the database logs before retrying.',
+    })
+  }
+
+  return {
+    data: {
+      submission: data.submission,
+    },
+  }
 })

@@ -1,4 +1,4 @@
-import { serverSupabaseServiceRole } from "#supabase/server";
+import { serverSupabaseClient, serverSupabaseServiceRole } from "#supabase/server";
 import { createError, getRouterParam } from "h3";
 import { requireFinalProjectAdmin } from "~/server/utils/finalProjectAuth";
 
@@ -15,13 +15,13 @@ export default defineEventHandler(async (event) => {
   /*
    * Verify that the logged-in user is an administrator.
    */
-  const supabase = await serverSupabaseServiceRole(event);
-  const adminUser = await requireFinalProjectAdmin(event, supabase);
+  const userClient = await serverSupabaseClient(event);
+  const adminUser = await requireFinalProjectAdmin(event, userClient);
 
   /*
    * Resolve the database administrator ID used by reviewed_by.
    */
-  const { data: adminRow, error: adminError } = await supabase
+  const { data: adminRow, error: adminError } = await userClient
     .from("admin")
     .select("id")
     .eq("email", adminUser.email)
@@ -50,6 +50,9 @@ export default defineEventHandler(async (event) => {
    * Atomically preserve the original assessment snapshot and approve
    * the request. Both operations are handled by the database RPC.
    */
+  // The approval RPC is restricted to service_role.
+  const supabase = await serverSupabaseServiceRole(event);
+
   const { data: rpcData, error: rpcError } = await supabase.rpc(
     "approve_final_project_regrading_request",
     {

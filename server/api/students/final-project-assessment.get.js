@@ -14,11 +14,32 @@ import { deriveOverallStatus } from '~/server/utils/finalProjectAssessment'
 // student has no assignment yet, since "no assignment" is an expected,
 // normal state for most students most of the time, not an error.
 export default defineEventHandler(async (event) => {
-  const supabase = await serverSupabaseClient(event)
-  const user = await serverSupabaseUser(event)
+  let supabase
+  let user
+
+  try {
+    supabase = await serverSupabaseClient(event)
+    user = await serverSupabaseUser(event)
+  } catch (error) {
+    const message = String(
+      error?.statusMessage || error?.message || ''
+    )
+
+    if (message === 'Auth session missing!') {
+      throw createError({
+        statusCode: 401,
+        statusMessage: 'Not authenticated',
+      })
+    }
+
+    throw error
+  }
 
   if (!user?.email) {
-    throw createError({ statusCode: 401, statusMessage: 'Not authenticated' })
+    throw createError({
+      statusCode: 401,
+      statusMessage: 'Not authenticated',
+    })
   }
 
   const { data: student, error: studentError } = await supabase
