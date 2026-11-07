@@ -39,6 +39,7 @@ jobs:
           import re
           from collections import Counter
           from datetime import datetime
+          from zoneinfo import ZoneInfo
           from hashlib import sha256
 
           import gspread
@@ -178,8 +179,14 @@ jobs:
               print("Using exact headers; no fuzzy column matching.")
 
               date_counts = Counter()
+              year_counts = Counter()
+              live_by_type = {}
               type_counts = Counter()
               live_counts = Counter()
+              dates_before_2000 = 0
+              dates_before_2020 = 0
+              future_dates = 0
+              audit_date = datetime.now(ZoneInfo("Europe/Amsterdam")).date()
               missing_email = 0
               invalid_email = 0
               missing_date = 0
@@ -219,6 +226,13 @@ jobs:
                           invalid_date += 1
                       else:
                           valid_dates.append(session_date)
+                          year_counts[session_date.year] += 1
+                          if session_date.year < 2000:
+                              dates_before_2000 += 1
+                          if session_date.year < 2020:
+                              dates_before_2020 += 1
+                          if session_date > audit_date:
+                              future_dates += 1
 
                   if not timestamp_raw:
                       missing_timestamp += 1
@@ -242,7 +256,12 @@ jobs:
                       type_counts[session_type] += 1
 
                   if indexes["live"] is not None:
-                      live_counts[normalized_live(live_raw)] += 1
+                      live_value = normalized_live(live_raw)
+                      live_counts[live_value] += 1
+                      if session_type:
+                          if session_type not in live_by_type:
+                              live_by_type[session_type] = Counter()
+                          live_by_type[session_type][live_value] += 1
 
                   # A complete signature includes submission timestamp as well as
                   # normalized email, actual session date, and session type.
@@ -269,8 +288,18 @@ jobs:
                     min(valid_dates).isoformat() if valid_dates else "Unavailable",
                     "to",
                     max(valid_dates).isoformat() if valid_dates else "Unavailable")
+              print("Audit date:", audit_date.isoformat())
+              print("Session records by year:", dict(sorted(year_counts.items())))
+              print("Session dates before 2000:", dates_before_2000)
+              print("Session dates before 2020:", dates_before_2020)
+              print("Future-dated session records:", future_dates)
               print("Missing session dates:", missing_date)
               print("Invalid session dates:", invalid_date)
+              print(
+                  "Records unassignable to an assessment period "
+                  "(missing or invalid session date):",
+                  missing_date + invalid_date,
+              )
               print("Missing student emails:", missing_email)
               print("Invalid-format student emails:", invalid_email)
               print("Missing submission timestamps:", missing_timestamp)
@@ -284,6 +313,13 @@ jobs:
                   print(
                       "Live-attendance responses:",
                       dict(sorted(live_counts.items()))
+                  )
+                  print(
+                      "Live-attendance responses by session type:",
+                      {
+                          key: dict(sorted(value.items()))
+                          for key, value in sorted(live_by_type.items())
+                      }
                   )
               print("Rows with complete deduplication signatures:", len(signatures))
               print("Duplicate signatures within this worksheet:",
