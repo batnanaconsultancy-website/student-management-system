@@ -147,7 +147,6 @@ jobs:
                   "email": EMAIL_HEADER,
                   "date": DATE_HEADER,
                   "type": TYPE_HEADER,
-                  "live": LIVE_HEADER,
               }
               indexes = {}
               for key, header in required.items():
@@ -158,6 +157,22 @@ jobs:
                           f"found {len(matches)}."
                       )
                   indexes[key] = matches[0]
+
+              live_matches = [
+                  i for i, value in enumerate(headers) if value == LIVE_HEADER
+              ]
+              if len(live_matches) > 1:
+                  raise RuntimeError(
+                      f"{ws.title}: found multiple '{LIVE_HEADER}' headers."
+                  )
+
+              indexes["live"] = live_matches[0] if live_matches else None
+              print(
+                  "Live-attendance column:",
+                  f"present at column {indexes['live'] + 1}"
+                  if indexes["live"] is not None
+                  else "unavailable in this worksheet"
+              )
 
               print("Data rows:", max(0, len(values) - 1))
               print("Using exact headers; no fuzzy column matching.")
@@ -184,7 +199,11 @@ jobs:
                   session_date_raw = cell(row, indexes["date"])
                   timestamp_raw = cell(row, indexes["timestamp"])
                   session_type_raw = cell(row, indexes["type"])
-                  live_raw = cell(row, indexes["live"])
+                  live_raw = (
+                      cell(row, indexes["live"])
+                      if indexes["live"] is not None
+                      else None
+                  )
 
                   if not email:
                       missing_email += 1
@@ -222,7 +241,8 @@ jobs:
                   if session_type:
                       type_counts[session_type] += 1
 
-                  live_counts[normalized_live(live_raw)] += 1
+                  if indexes["live"] is not None:
+                      live_counts[normalized_live(live_raw)] += 1
 
                   # A complete signature includes submission timestamp as well as
                   # normalized email, actual session date, and session type.
@@ -258,7 +278,13 @@ jobs:
               print("Missing session types:", missing_type)
               print("Counts by session type:", dict(sorted(type_counts.items())))
               print("Unexpected session types:", dict(unknown_types))
-              print("Live-attendance responses:", dict(sorted(live_counts.items())))
+              if indexes["live"] is None:
+                  print("Live-attendance responses: Column unavailable")
+              else:
+                  print(
+                      "Live-attendance responses:",
+                      dict(sorted(live_counts.items()))
+                  )
               print("Rows with complete deduplication signatures:", len(signatures))
               print("Duplicate signatures within this worksheet:",
                     len(signatures) - len(signature_set))
