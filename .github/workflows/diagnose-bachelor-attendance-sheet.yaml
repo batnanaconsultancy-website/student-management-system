@@ -76,6 +76,13 @@ jobs:
               print("Columns:", ws.col_count)
               print("Candidate GID match:", ws.id in candidate_gids)
 
+              if ws.id not in candidate_gids:
+                  print(
+                      "Skipping worksheet contents; "
+                      "not a Bachelor's attendance candidate."
+                  )
+                  continue
+
               values = ws.get_all_values()
 
               if not values:
