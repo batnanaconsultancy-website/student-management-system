@@ -1,0 +1,139 @@
+name: Diagnose Bachelor's Attendance Sheet
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bachelor-attendance-sheet-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  inspect-sheet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install read-only inspection dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install gspread google-auth
+
+      - name: Inspect Bachelor's attendance worksheets
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          import gspread
+          from google.oauth2.service_account import Credentials
+
+          spreadsheet_id = "1LQum-XZSTaun1cJ7AHxjS63JLGzMPFpCWEAES6gNZTg"
+          candidate_gids = {334409729, 394749220}
+
+          raw_credentials = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+          if not raw_credentials:
+              raise RuntimeError("GOOGLE_CREDENTIALS_JSON secret is missing.")
+
+          info = json.loads(raw_credentials)
+
+          scopes = [
+              "https://www.googleapis.com/auth/spreadsheets.readonly",
+          ]
+
+          credentials = Credentials.from_service_account_info(
+              info,
+              scopes=scopes,
+          )
+          gc = gspread.authorize(credentials)
+
+          spreadsheet = gc.open_by_key(spreadsheet_id)
+
+          print("Spreadsheet title:", spreadsheet.title)
+          print("Candidate worksheet GIDs:", sorted(candidate_gids))
+
+          worksheets = spreadsheet.worksheets()
+
+          for ws in worksheets:
+              print("\n===== WORKSHEET =====")
+              print("Title:", ws.title)
+              print("GID:", ws.id)
+              print("Rows:", ws.row_count)
+              print("Columns:", ws.col_count)
+              print("Candidate GID match:", ws.id in candidate_gids)
+
+              if ws.id not in candidate_gids:
+                  print(
+                      "Skipping worksheet contents; "
+                      "not a Bachelor's attendance candidate."
+                  )
+                  continue
+
+              values = ws.get_all_values()
+
+              if not values:
+                  print("No data.")
+                  continue
+
+              headers = values[0]
+              print("Headers:", headers)
+
+              date_indexes = [
+                  i for i, header in enumerate(headers)
+                  if any(
+                      word in header.lower()
+                      for word in ("date", "timestamp", "time")
+                  )
+              ]
+
+              type_indexes = [
+                  i for i, header in enumerate(headers)
+                  if any(
+                      word in header.lower()
+                      for word in ("session", "type", "activity")
+                  )
+              ]
+
+              if not date_indexes and len(headers) > 1:
+                  print(
+                      "No date-like header found. "
+                      "Inspecting column B as a documented candidate."
+                  )
+                  date_indexes = [1]
+
+              for index in date_indexes:
+                  header = headers[index] if index < len(headers) else ""
+                  samples = [
+                      row[index]
+                      for row in values[1:]
+                      if len(row) > index and row[index].strip()
+                  ]
+
+                  print("Date column:", index + 1, repr(header))
+                  print("Date samples:", samples[:8])
+
+              for index in type_indexes:
+                  header = headers[index]
+                  distinct = sorted({
+                      row[index].strip()
+                      for row in values[1:]
+                      if len(row) > index and row[index].strip()
+                  })
+
+                  print("Session type column:", index + 1, repr(header))
+                  print("Distinct session types:", distinct[:30])
+
+          print("\nInspection completed. No records were modified.")
+          PY
