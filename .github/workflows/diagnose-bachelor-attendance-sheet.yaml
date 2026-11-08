@@ -128,6 +128,7 @@ jobs:
           print("Candidate worksheet GIDs:", sorted(CANDIDATE_GIDS))
 
           audits = {}
+          audit_details = {}
 
           for ws in spreadsheet.worksheets():
               if ws.id not in CANDIDATE_GIDS:
@@ -139,6 +140,7 @@ jobs:
               if not values:
                   print("Worksheet is empty.")
                   audits[ws.id] = set()
+                  audit_details[ws.id] = {}
                   continue
 
               headers = [h.strip() for h in values[0]]
@@ -197,6 +199,7 @@ jobs:
               unknown_types = Counter()
               valid_dates = []
               signatures = []
+              signature_records = {}
 
               for row in values[1:]:
                   if not any((value or "").strip() for value in row):
@@ -277,12 +280,24 @@ jobs:
                           session_type.casefold(),
                           timestamp.isoformat(),
                       )
-                      signatures.append(
-                          sha256("|".join(signature).encode("utf-8")).hexdigest()
-                      )
+                      signature_hash = sha256(
+                          "|".join(signature).encode("utf-8")
+                      ).hexdigest()
+                      signatures.append(signature_hash)
+                      signature_records[signature_hash] = {
+                          "session_date": session_date.isoformat(),
+                          "session_type": session_type,
+                          "live_column_available": indexes["live"] is not None,
+                          "live_status": (
+                              normalized_live(live_raw)
+                              if indexes["live"] is not None
+                              else "Unavailable"
+                          ),
+                      }
 
               signature_set = set(signatures)
               audits[ws.id] = signature_set
+              audit_details[ws.id] = signature_records
 
               print("Session date range:",
                     min(valid_dates).isoformat() if valid_dates else "Unavailable",
@@ -334,6 +349,25 @@ jobs:
           print(f"Worksheet GID {second_gid} complete signatures:", len(second))
           print("Matching signatures across both worksheets:", len(first & second))
           print("Unique signatures across both worksheets:", len(first | second))
-          print("No emails, free-text responses, or raw row contents were printed.")
+
+          for label, gid, unmatched in (
+              ("Only in first worksheet", first_gid, first - second),
+              ("Only in second worksheet", second_gid, second - first),
+          ):
+              details = audit_details.get(gid, {})
+              print(f"\n{label}: {len(unmatched)}")
+              for signature_hash in sorted(unmatched):
+                  record = details.get(signature_hash)
+                  if record is None:
+                      print("Diagnostic metadata unavailable.")
+                      continue
+                  print({
+                      "session_date": record["session_date"],
+                      "session_type": record["session_type"],
+                      "live_column_available": record["live_column_available"],
+                      "live_status": record["live_status"],
+                  })
+
+          print("No emails, submission timestamps, free-text responses, or raw row contents were printed.")
           print("No database was accessed and no records were modified.")
           PY
