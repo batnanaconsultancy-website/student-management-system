@@ -129,6 +129,7 @@ jobs:
 
           audits = {}
           audit_details = {}
+          event_audits = {}
 
           for ws in spreadsheet.worksheets():
               if ws.id not in CANDIDATE_GIDS:
@@ -141,6 +142,7 @@ jobs:
                   print("Worksheet is empty.")
                   audits[ws.id] = set()
                   audit_details[ws.id] = {}
+                  event_audits[ws.id] = set()
                   continue
 
               headers = [h.strip() for h in values[0]]
@@ -200,6 +202,7 @@ jobs:
               valid_dates = []
               signatures = []
               signature_records = {}
+              event_signatures = set()
 
               for row in values[1:]:
                   if not any((value or "").strip() for value in row):
@@ -273,6 +276,16 @@ jobs:
                       re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
                   )
 
+                  if email_is_valid and session_date and session_type:
+                      event_signature = (
+                          email,
+                          session_date.isoformat(),
+                          session_type.casefold(),
+                      )
+                      event_signatures.add(
+                          sha256("|".join(event_signature).encode("utf-8")).hexdigest()
+                      )
+
                   if email_is_valid and session_date and timestamp and session_type:
                       signature = (
                           email,
@@ -298,6 +311,7 @@ jobs:
               signature_set = set(signatures)
               audits[ws.id] = signature_set
               audit_details[ws.id] = signature_records
+              event_audits[ws.id] = event_signatures
 
               print("Session date range:",
                     min(valid_dates).isoformat() if valid_dates else "Unavailable",
@@ -369,6 +383,19 @@ jobs:
 
           print(f"\nOnly in second worksheet: {len(second_only)}")
           print("Details suppressed for this worksheet; count only.")
+
+          first_events = event_audits.get(first_gid, set())
+          second_events = event_audits.get(second_gid, set())
+          first_events_only = first_events - second_events
+          second_events_only = second_events - first_events
+
+          print("\n===== TIMESTAMP-INDEPENDENT EVENT COMPARISON =====")
+          print(f"Worksheet GID {first_gid} event signatures:", len(first_events))
+          print(f"Worksheet GID {second_gid} event signatures:", len(second_events))
+          print("Matching student/date/type signatures:", len(first_events & second_events))
+          print("Unique student/date/type signatures:", len(first_events | second_events))
+          print("Only in first worksheet:", len(first_events_only))
+          print("Only in second worksheet:", len(second_events_only))
 
           print("No emails, submission timestamps, free-text responses, or raw row contents were printed.")
           print("No database was accessed and no records were modified.")
