@@ -350,23 +350,25 @@ jobs:
           print("Matching signatures across both worksheets:", len(first & second))
           print("Unique signatures across both worksheets:", len(first | second))
 
-          for label, gid, unmatched in (
-              ("Only in first worksheet", first_gid, first - second),
-              ("Only in second worksheet", second_gid, second - first),
-          ):
-              details = audit_details.get(gid, {})
-              print(f"\n{label}: {len(unmatched)}")
-              for signature_hash in sorted(unmatched):
-                  record = details.get(signature_hash)
-                  if record is None:
-                      print("Diagnostic metadata unavailable.")
-                      continue
-                  print({
-                      "session_date": record["session_date"],
-                      "session_type": record["session_type"],
-                      "live_column_available": record["live_column_available"],
-                      "live_status": record["live_status"],
-                  })
+          first_only = first - second
+          second_only = second - first
+
+          print(f"\nOnly in first worksheet: {len(first_only)}")
+          details = audit_details.get(first_gid, {})
+          for signature_hash in sorted(first_only):
+              record = details.get(signature_hash)
+              if record is None:
+                  print("Diagnostic metadata unavailable.")
+                  continue
+              print({
+                  "session_date": record["session_date"],
+                  "session_type": record["session_type"],
+                  "live_column_available": record["live_column_available"],
+                  "live_status": record["live_status"],
+              })
+
+          print(f"\nOnly in second worksheet: {len(second_only)}")
+          print("Details suppressed for this worksheet; count only.")
 
           print("No emails, submission timestamps, free-text responses, or raw row contents were printed.")
           print("No database was accessed and no records were modified.")
