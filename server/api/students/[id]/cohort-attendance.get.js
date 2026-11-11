@@ -1,9 +1,5 @@
 import { createError } from "h3";
-import {
-  requireAssessmentAccessAdmin,
-  requireAssessmentAccessUuid,
-} from "~/server/utils/assessmentAccessAdmin";
-import { computeCohortAttendance } from "~/server/utils/cohortAttendance";
+import { serverSupabaseClient } from "#supabase/server";
 
 export default defineEventHandler(async (event) => {
   try {
@@ -16,23 +12,67 @@ export default defineEventHandler(async (event) => {
       });
     }
 
-    const { service } = await requireAssessmentAccessAdmin(event);
-    requireAssessmentAccessUuid(studentId, "student ID");
+    const client = await serverSupabaseClient(event);
 
-    const { data: student, error } = await service
-      .from("students")
-      .select("id, cohort_id, workshops_attended, standup_attended, mentoring_attended")
-      .eq("id", studentId)
-      .single();
+    const { data: rows, error } = await client.rpc(
+      "get_assessment_student_attendance",
+      { p_student_id: studentId },
+    );
 
     if (error) {
       throw createError({
-        statusCode: 404,
-        statusMessage: error.message || "Student not found",
+        statusCode:
+          error.code === "P0002" ? 404 : error.code === "42501" ? 403 : 500,
+        statusMessage: error.message || "Unable to load attendance summary",
       });
     }
 
-    const data = await computeCohortAttendance(service, student);
+    const summary = rows?.[0];
+
+    if (!summary) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: "Student attendance summary not found",
+      });
+    }
+
+    const calculatePoints = (percent, maximum) =>
+      Number(((Number(percent || 0) / 100) * maximum).toFixed(2));
+
+    const workshopsPoints = calculatePoints(summary.workshops_percent, 3);
+    const mentoringPoints = calculatePoints(summary.mentoring_percent, 3);
+    const standupsPoints = calculatePoints(summary.standups_percent, 1);
+
+    const data = {
+      cohortSize: Number(summary.cohort_size || 0),
+      workshops: {
+        value: Number(summary.workshops || 0),
+        max: Number(summary.workshops_max || 0),
+        percent: Number(summary.workshops_percent || 0),
+        points: workshopsPoints,
+      },
+      standups: {
+        value: Number(summary.standups || 0),
+        max: Number(summary.standups_max || 0),
+        percent: Number(summary.standups_percent || 0),
+        points: standupsPoints,
+      },
+      mentoring: {
+        value: Number(summary.mentoring || 0),
+        max: Number(summary.mentoring_max || 0),
+        percent: Number(summary.mentoring_percent || 0),
+        points: mentoringPoints,
+      },
+      total: {
+        value: Number(summary.overall || 0),
+        max: Number(summary.overall_max || 0),
+        percent: Number(summary.overall_percent || 0),
+        points: Number(
+          (workshopsPoints + mentoringPoints + standupsPoints).toFixed(2),
+        ),
+      },
+    };
+
     return { data };
   } catch (err) {
     if (err.statusCode) throw err;

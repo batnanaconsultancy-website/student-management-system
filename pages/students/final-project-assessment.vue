@@ -79,12 +79,14 @@ const overallColor = computed(() => {
             <div class="flex items-center gap-2">
               <UIcon :name="submittedStatus(status.submission) ? 'i-lucide-check-circle-2' : 'i-lucide-circle'" :class="submittedStatus(status.submission) ? 'text-success' : 'text-muted'" class="size-5" />
               <span class="text-sm">Final Project Submission</span>
-              <span v-if="status.submission?.averageGrade != null" class="text-xs text-muted">(Grade: {{ status.submission.averageGrade }})</span>
+              <UBadge v-if="status.submission?.status === 'REOPENED'" color="warning" variant="subtle">Reopened for reassessment</UBadge>
+              <span v-if="submittedStatus(status.submission) && status.submission?.averageGrade != null" class="text-xs text-muted">(Grade: {{ status.submission.averageGrade }})</span>
             </div>
             <div class="flex items-center gap-2">
               <UIcon :name="submittedStatus(status.presentation) ? 'i-lucide-check-circle-2' : 'i-lucide-circle'" :class="submittedStatus(status.presentation) ? 'text-success' : 'text-muted'" class="size-5" />
               <span class="text-sm">Final Project Presentation</span>
-              <span v-if="status.presentation?.averageGrade != null" class="text-xs text-muted">(Grade: {{ status.presentation.averageGrade }})</span>
+              <UBadge v-if="status.presentation?.status === 'REOPENED'" color="warning" variant="subtle">Reopened for reassessment</UBadge>
+              <span v-if="submittedStatus(status.presentation) && status.presentation?.averageGrade != null" class="text-xs text-muted">(Grade: {{ status.presentation.averageGrade }})</span>
             </div>
           </div>
 
