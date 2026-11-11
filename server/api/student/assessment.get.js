@@ -18,6 +18,8 @@ export default defineEventHandler(async (event) => {
       projectsResult,
       completionsResult,
       seasonsResult,
+      finalProjectResult,
+      attendanceResult,
     ] = await Promise.all([
       client
         .from('students')
@@ -69,6 +71,27 @@ export default defineEventHandler(async (event) => {
         .eq('cohort_id', context.student.cohort_id)
         .eq('program_id', context.student.program_id)
         .order('start_date', { ascending: true }),
+
+      client
+        .from('final_project_assignments')
+        .select(`
+          id,
+          archived,
+          final_project_submissions (
+            assessment_type,
+            status,
+            average_grade,
+            submitted_at,
+            reopened_at
+          )
+        `)
+        .eq('student_id', studentId)
+        .eq('archived', false)
+        .maybeSingle(),
+
+      authenticatedClient.rpc('get_assessment_student_attendance', {
+        p_student_id: studentId,
+      }),
     ])
 
     const results = [
@@ -77,6 +100,7 @@ export default defineEventHandler(async (event) => {
       projectsResult,
       completionsResult,
       seasonsResult,
+      finalProjectResult,
     ]
 
     const failed = results.find(result => result.error)
@@ -96,16 +120,60 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    const attendance = {
-      workshops: Number(student.workshops_attended || 0),
-      mentoring: Number(student.mentoring_attended || 0),
-      standups: Number(student.standup_attended || 0),
+    if (attendanceResult.error) {
+      console.error('Student attendance summary query failed:', attendanceResult.error)
+
+      const isNotFound = attendanceResult.error.code === 'P0002'
+      const isForbidden = attendanceResult.error.code === '42501'
+
+      throw createError({
+        statusCode: isNotFound ? 404 : isForbidden ? 403 : 500,
+        statusMessage: isNotFound
+          ? 'Student record not found'
+          : isForbidden
+            ? 'You are not authorised to view this attendance summary'
+            : 'Unable to load attendance summary',
+      })
     }
 
-    attendance.points =
-      attendance.workshops * 3 +
-      attendance.mentoring * 3 +
-      attendance.standups
+    const attendanceSummary = attendanceResult.data?.[0]
+
+    if (!attendanceSummary) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: 'Student attendance summary not found',
+      })
+    }
+
+    const calculatePoints = (percent, maximum) =>
+      Number((Number(percent || 0) / 100 * maximum).toFixed(2))
+
+    const attendance = {
+      workshops: {
+        count: Number(attendanceSummary.workshops || 0),
+        max: Number(attendanceSummary.workshops_max || 0),
+        percent: Number(attendanceSummary.workshops_percent || 0),
+        points: calculatePoints(attendanceSummary.workshops_percent, 3),
+      },
+      mentoring: {
+        count: Number(attendanceSummary.mentoring || 0),
+        max: Number(attendanceSummary.mentoring_max || 0),
+        percent: Number(attendanceSummary.mentoring_percent || 0),
+        points: calculatePoints(attendanceSummary.mentoring_percent, 3),
+      },
+      standups: {
+        count: Number(attendanceSummary.standups || 0),
+        max: Number(attendanceSummary.standups_max || 0),
+        percent: Number(attendanceSummary.standups_percent || 0),
+        points: calculatePoints(attendanceSummary.standups_percent, 1),
+      },
+    }
+
+    attendance.total_points = Number((
+      attendance.workshops.points +
+      attendance.mentoring.points +
+      attendance.standups.points
+    ).toFixed(2))
 
     const completedIds = new Set(
       (completionsResult.data || [])
@@ -139,19 +207,58 @@ export default defineEventHandler(async (event) => {
       is_completed: completedIds.has(project.id),
     }))
 
-    const seasonProgress = (progressResult.data || []).map(row => ({
-      season_id: row.season_id,
-      season_name: seasonNames.get(row.season_id) || 'Unknown Season',
-      progress_percentage: Number(row.progress_percentage || 0),
-      is_completed: isSeasonCompleted(
-        row.progress_percentage,
-        row.is_completed,
-      ),
-      ...(seasonSchedules.get(row.season_id) || {
-        start_date: null,
-        end_date: null,
-      }),
-    }))
+    const progressBySeason = new Map(
+      (progressResult.data || []).map(row => [row.season_id, row]),
+    )
+
+    // Include scheduled Seasons without progress, while retaining historical records.
+    const seasonIds = new Set([
+      ...seasonSchedules.keys(),
+      ...progressBySeason.keys(),
+    ])
+
+    const seasonProgress = Array.from(seasonIds).map(seasonId => {
+      const row = progressBySeason.get(seasonId)
+      const progressPercentage = Number(row?.progress_percentage || 0)
+
+      return {
+        season_id: seasonId,
+        season_name: seasonNames.get(seasonId) || 'Unknown Season',
+        progress_percentage: progressPercentage,
+        is_completed: isSeasonCompleted(
+          progressPercentage,
+          row?.is_completed,
+        ),
+        ...(seasonSchedules.get(seasonId) || {
+          start_date: null,
+          end_date: null,
+        }),
+      }
+    })
+
+    const finalProjectSubmissions =
+      finalProjectResult.data?.final_project_submissions || []
+
+    const getReleasedAssessment = (assessmentType) => {
+      const record = finalProjectSubmissions.find(
+        item => item.assessment_type === assessmentType,
+      )
+
+      if (!record) return null
+
+      const isActivelyReopened = Boolean(
+        record.reopened_at &&
+        record.submitted_at &&
+        new Date(record.reopened_at) > new Date(record.submitted_at),
+      )
+      const isSubmitted = record.status === 'SUBMITTED' && !isActivelyReopened
+
+      return {
+        status: isActivelyReopened ? 'REOPENED' : record.status,
+        grade: isSubmitted ? record.average_grade : null,
+        submitted_at: record.submitted_at || null,
+      }
+    }
 
     return {
       data: {
@@ -164,7 +271,6 @@ export default defineEventHandler(async (event) => {
         },
         low_stakes: {
           ...attendance,
-          recorded_points: Number(student.points_assigned ?? attendance.points),
           target: null,
           target_note: 'Assessment thresholds are programme-specific and are not yet applied here.',
         },
@@ -178,7 +284,17 @@ export default defineEventHandler(async (event) => {
         season_progress: seasonProgress,
         high_stakes: {
           final_project_assessment_available: true,
-          note: 'Final Project Assessment is managed through the existing assessment process. Other VIVA evidence will be added when programme-specific rules are configured.',
+          final_project: {
+            has_assignment: Boolean(finalProjectResult.data),
+            submission: finalProjectResult.data
+              ? getReleasedAssessment('submission')
+              : null,
+            presentation: finalProjectResult.data
+              ? getReleasedAssessment('presentation')
+              : null,
+          },
+          viva_available: false,
+          note: 'Submission and Presentation results are shown only after they are submitted. VIVA evidence is not yet integrated into this dashboard.',
         },
         is_student_view: context.isStudentView,
       },

@@ -40,10 +40,10 @@ const stats = computed(() => {
   if (!attendance.value) return []
   const a = attendance.value
   return [
-    { icon: 'i-lucide-presentation', label: 'Workshops', ...a.workshops, colorType: 'info' },
-    { icon: 'i-lucide-users', label: 'Stand-ups', ...a.standups, colorType: 'info' },
-    { icon: 'i-lucide-user-check', label: 'Mentoring', ...a.mentoring, colorType: 'info' },
-    { icon: 'i-lucide-calendar-check', label: 'Overall', ...a.total, colorType: 'success' },
+    { icon: 'i-lucide-presentation', label: 'Workshops', ...a.workshops, pointsMax: 3, colorType: 'info' },
+    { icon: 'i-lucide-users', label: 'Stand-ups', ...a.standups, pointsMax: 1, colorType: 'info' },
+    { icon: 'i-lucide-user-check', label: 'Mentoring', ...a.mentoring, pointsMax: 3, colorType: 'info' },
+    { icon: 'i-lucide-calendar-check', label: 'Overall', ...a.total, pointsMax: 7, colorType: 'success' },
   ]
 })
 
@@ -107,6 +107,9 @@ const barColorClass = (iconColor) => {
         class="hover:z-1 hover:bg-elevated"
       >
         <p class="text-lg lg:text-xl xl:text-xl text-highlighted font-semibold">{{ stat.percent }}%</p>
+        <p class="text-sm font-medium text-highlighted mt-1">
+          {{ Number(stat.points || 0).toFixed(2) }} / {{ stat.pointsMax.toFixed(2) }} points
+        </p>
         <div class="w-full h-1.5 rounded-full bg-elevated overflow-hidden mt-1.5">
           <div
             class="h-full rounded-full transition-all"

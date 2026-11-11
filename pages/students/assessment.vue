@@ -13,11 +13,25 @@ interface AssessmentResponse {
       cohort_name: string | null
     }
     low_stakes: {
-      workshops: number
-      mentoring: number
-      standups: number
-      points: number
-      recorded_points: number
+      workshops: {
+        count: number
+        max: number
+        percent: number
+        points: number
+      }
+      mentoring: {
+        count: number
+        max: number
+        percent: number
+        points: number
+      }
+      standups: {
+        count: number
+        max: number
+        percent: number
+        points: number
+      }
+      total_points: number
       target: number | null
       target_note: string
     }
@@ -42,6 +56,20 @@ interface AssessmentResponse {
     }>
     high_stakes: {
       final_project_assessment_available: boolean
+      final_project: {
+        has_assignment: boolean
+        submission: {
+          status: string
+          grade: number | string | null
+          submitted_at: string | null
+        } | null
+        presentation: {
+          status: string
+          grade: number | string | null
+          submitted_at: string | null
+        } | null
+      }
+      viva_available: boolean
       note: string
     }
     is_student_view: boolean
@@ -123,29 +151,59 @@ function formatProgress(value: number) {
             <h2 class="text-lg font-semibold text-highlighted">Low-stakes evidence</h2>
             <p class="text-sm text-muted">
               Recorded participation in workshops, mentoring and stand-ups.
+              Percentages compare your recorded attendance with the highest
+              count in your cohort for each category; they are not percentages
+              of all sessions offered. Points are calculated from these
+              percentages using the category weights.
             </p>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <UCard>
               <p class="text-sm text-muted">Workshops</p>
-              <p class="text-2xl font-semibold">{{ lowStakes?.workshops }}</p>
-              <p class="text-xs text-muted">3 points per attendance</p>
+              <p class="text-2xl font-semibold">
+                {{ formatProgress(lowStakes?.workshops.percent ?? 0) }}
+              </p>
+              <p class="text-sm font-medium mt-2">
+                {{ (lowStakes?.workshops.points ?? 0).toFixed(2) }} / 3.00 points
+              </p>
+              <p class="text-xs text-muted mt-1">
+                {{ lowStakes?.workshops.count ?? 0 }} / {{ lowStakes?.workshops.max ?? 0 }} attendances
+              </p>
             </UCard>
+
             <UCard>
               <p class="text-sm text-muted">Mentoring</p>
-              <p class="text-2xl font-semibold">{{ lowStakes?.mentoring }}</p>
-              <p class="text-xs text-muted">3 points per attendance</p>
+              <p class="text-2xl font-semibold">
+                {{ formatProgress(lowStakes?.mentoring.percent ?? 0) }}
+              </p>
+              <p class="text-sm font-medium mt-2">
+                {{ (lowStakes?.mentoring.points ?? 0).toFixed(2) }} / 3.00 points
+              </p>
+              <p class="text-xs text-muted mt-1">
+                {{ lowStakes?.mentoring.count ?? 0 }} / {{ lowStakes?.mentoring.max ?? 0 }} attendances
+              </p>
             </UCard>
+
             <UCard>
               <p class="text-sm text-muted">Stand-ups</p>
-              <p class="text-2xl font-semibold">{{ lowStakes?.standups }}</p>
-              <p class="text-xs text-muted">1 point per attendance</p>
+              <p class="text-2xl font-semibold">
+                {{ formatProgress(lowStakes?.standups.percent ?? 0) }}
+              </p>
+              <p class="text-sm font-medium mt-2">
+                {{ (lowStakes?.standups.points ?? 0).toFixed(2) }} / 1.00 points
+              </p>
+              <p class="text-xs text-muted mt-1">
+                {{ lowStakes?.standups.count ?? 0 }} / {{ lowStakes?.standups.max ?? 0 }} attendances
+              </p>
             </UCard>
+
             <UCard>
-              <p class="text-sm text-muted">Recorded attendance points</p>
-              <p class="text-2xl font-semibold">{{ lowStakes?.recorded_points }}</p>
-              <p class="text-xs text-muted">Cumulative total</p>
+              <p class="text-sm text-muted">Total attendance points</p>
+              <p class="text-2xl font-semibold">
+                {{ (lowStakes?.total_points ?? 0).toFixed(2) }} / 7.00
+              </p>
+              <p class="text-xs text-muted mt-2">Sum of weighted category points</p>
             </UCard>
           </div>
 
@@ -229,7 +287,13 @@ function formatProgress(value: number) {
                 </div>
                 <UProgress :model-value="season.progress_percentage" />
                 <p class="text-xs text-muted">
-                  {{ season.is_completed ? 'Season completed' : 'In progress' }}
+                  {{
+                    season.is_completed
+                      ? 'Season completed'
+                      : season.progress_percentage <= 0
+                        ? 'Not started'
+                        : 'In progress'
+                  }}
                 </p>
               </div>
             </div>
@@ -248,18 +312,56 @@ function formatProgress(value: number) {
           </div>
 
           <UCard>
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p class="font-medium text-highlighted">Final Project Assessment</p>
-                <p class="text-sm text-muted">{{ assessment.high_stakes.note }}</p>
+            <div class="space-y-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p class="font-medium text-highlighted">Final Project Assessment</p>
+                  <p class="text-sm text-muted">{{ assessment.high_stakes.note }}</p>
+                </div>
+                <UButton
+                  to="/students/final-project-assessment"
+                  color="primary"
+                  variant="outline"
+                >
+                  View Final Project Assessment
+                </UButton>
               </div>
-              <UButton
-                to="/students/final-project-assessment"
-                color="primary"
-                variant="outline"
-              >
-                View Final Project Assessment
-              </UButton>
+
+              <div v-if="assessment.high_stakes.final_project.has_assignment" class="grid gap-4 sm:grid-cols-2">
+                <div class="rounded-lg bg-elevated p-3 space-y-1">
+                  <p class="font-medium text-highlighted">Submission</p>
+                  <p class="text-sm text-muted">
+                    {{ assessment.high_stakes.final_project.submission?.status || 'No submission record' }}
+                  </p>
+                  <p
+                    v-if="assessment.high_stakes.final_project.submission?.status === 'SUBMITTED' && assessment.high_stakes.final_project.submission.grade != null"
+                    class="text-sm font-medium text-highlighted"
+                  >
+                    Grade: {{ assessment.high_stakes.final_project.submission.grade }}
+                  </p>
+                </div>
+
+                <div class="rounded-lg bg-elevated p-3 space-y-1">
+                  <p class="font-medium text-highlighted">Presentation</p>
+                  <p class="text-sm text-muted">
+                    {{ assessment.high_stakes.final_project.presentation?.status || 'No presentation record' }}
+                  </p>
+                  <p
+                    v-if="assessment.high_stakes.final_project.presentation?.status === 'SUBMITTED' && assessment.high_stakes.final_project.presentation.grade != null"
+                    class="text-sm font-medium text-highlighted"
+                  >
+                    Grade: {{ assessment.high_stakes.final_project.presentation.grade }}
+                  </p>
+                </div>
+              </div>
+
+              <p v-else class="text-sm text-muted">
+                No active Final Project Assessment assignment is recorded.
+              </p>
+
+              <p class="text-sm text-muted">
+                VIVA: {{ assessment.high_stakes.viva_available ? 'Evidence available' : 'VIVA evidence is not yet integrated into this dashboard.' }}
+              </p>
             </div>
           </UCard>
         </section>
