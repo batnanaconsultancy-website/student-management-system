@@ -1,53 +1,49 @@
-import { createError } from 'h3'
-import { serverSupabaseClient } from '#supabase/server'
+import { createError } from "h3";
+import {
+  requireAssessmentAccessAdmin,
+  requireAssessmentAccessUuid,
+} from "~/server/utils/assessmentAccessAdmin";
 
-/**
- * GET /api/students/:id/project-completions
- * Fetch all project completions for a specific student
- */
 export default defineEventHandler(async (event) => {
   try {
-    const studentId = getRouterParam(event, 'id')
+    const studentId = getRouterParam(event, "id");
 
     if (!studentId) {
       throw createError({
         statusCode: 400,
-        statusMessage: 'Student ID is required'
-      })
+        statusMessage: "Student ID is required",
+      });
     }
 
-    const client = await serverSupabaseClient(event)
+    const { service } = await requireAssessmentAccessAdmin(event);
+    requireAssessmentAccessUuid(studentId, "student ID");
 
-    // Fetch project completions with project details
-    const { data: projectCompletions, error: completionsError } = await client
-      .from('student_project_completion')
+    const { data: projectCompletions, error } = await service
+      .from("student_project_completion")
       .select(`
         *,
         projects(id, name, description, duration_days)
       `)
-      .eq('student_id', studentId)
-      .order('created_at', { ascending: false })
+      .eq("student_id", studentId)
+      .order("created_at", { ascending: false });
 
-    if (completionsError) {
-      console.error('Error fetching project completions:', completionsError)
+    if (error) {
+      console.error("Error fetching project completions:", error);
       throw createError({
         statusCode: 500,
-        statusMessage: completionsError.message || 'Failed to fetch project completions'
-      })
+        statusMessage: error.message || "Failed to fetch project completions",
+      });
     }
 
-    return { data: projectCompletions || [] }
+    return { data: projectCompletions || [] };
   } catch (err) {
-    console.error('Project completions handler error:', err)
+    console.error("Project completions handler error:", err);
 
-    // If it's already a createError, re-throw it
-    if (err.statusCode) {
-      throw err
-    }
+    if (err.statusCode) throw err;
 
     throw createError({
       statusCode: 500,
-      statusMessage: err?.message || 'Internal server error'
-    })
+      statusMessage: err?.message || "Internal server error",
+    });
   }
-})
+});
