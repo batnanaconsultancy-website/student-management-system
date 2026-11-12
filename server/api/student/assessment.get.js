@@ -20,6 +20,7 @@ export default defineEventHandler(async (event) => {
       seasonsResult,
       finalProjectResult,
       attendanceResult,
+      attendanceAuditResult,
     ] = await Promise.all([
       client
         .from('students')
@@ -92,6 +93,10 @@ export default defineEventHandler(async (event) => {
       authenticatedClient.rpc('get_assessment_student_attendance', {
         p_student_id: studentId,
       }),
+
+      authenticatedClient.rpc('get_assessment_student_attendance_audit', {
+        p_student_id: studentId,
+      }),
     ])
 
     const results = [
@@ -136,7 +141,31 @@ export default defineEventHandler(async (event) => {
       })
     }
 
+    if (attendanceAuditResult.error) {
+      console.error('Student attendance audit query failed:', attendanceAuditResult.error)
+
+      const isNotFound = attendanceAuditResult.error.code === 'P0002'
+      const isForbidden = attendanceAuditResult.error.code === '42501'
+
+      throw createError({
+        statusCode: isNotFound ? 404 : isForbidden ? 403 : 500,
+        statusMessage: isNotFound
+          ? 'Student record not found'
+          : isForbidden
+            ? 'You are not authorised to view this attendance audit'
+            : 'Unable to load attendance audit',
+      })
+    }
+
     const attendanceSummary = attendanceResult.data?.[0]
+    const attendanceAuditSummary = attendanceAuditResult.data?.[0]
+
+    if (!attendanceAuditSummary) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Student attendance audit returned no data',
+      })
+    }
 
     if (!attendanceSummary) {
       throw createError({
@@ -174,6 +203,25 @@ export default defineEventHandler(async (event) => {
       attendance.mentoring.points +
       attendance.standups.points
     ).toFixed(2))
+
+    const attendanceAudit = {
+      uses_ledger: Boolean(attendanceAuditSummary?.uses_ledger),
+      legacy: {
+        workshops: attendanceAuditSummary?.legacy_workshops == null
+          ? null
+          : Number(attendanceAuditSummary.legacy_workshops),
+        mentoring: attendanceAuditSummary?.legacy_mentoring == null
+          ? null
+          : Number(attendanceAuditSummary.legacy_mentoring),
+        standups: attendanceAuditSummary?.legacy_standups == null
+          ? null
+          : Number(attendanceAuditSummary.legacy_standups),
+      },
+      unverified_total: Number(attendanceAuditSummary?.unverified_total || 0),
+      unverified_by_reason: Array.isArray(attendanceAuditSummary?.unverified_by_reason)
+        ? attendanceAuditSummary.unverified_by_reason
+        : [],
+    }
 
     const completedIds = new Set(
       (completionsResult.data || [])
@@ -271,6 +319,7 @@ export default defineEventHandler(async (event) => {
         },
         low_stakes: {
           ...attendance,
+          audit: attendanceAudit,
           target: null,
           target_note: 'Assessment thresholds are programme-specific and are not yet applied here.',
         },

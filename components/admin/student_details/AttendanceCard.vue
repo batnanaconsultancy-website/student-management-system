@@ -66,6 +66,31 @@ const barColorClass = (iconColor) => {
   }
   return colorMap[iconColor] || 'bg-primary'
 }
+
+const formatAuditReason = (reason) => {
+  const labels = {
+    live_status_blank: 'Live attendance status was blank',
+    live_status_unavailable: 'Live-attendance field unavailable in source',
+    session_type_not_points_eligible: 'Session type does not count toward attendance points',
+    season_schedule_gap: 'No matching Season schedule',
+    session_date_in_future: 'Session date is in the future',
+    session_date_missing: 'Session date missing',
+    student_email_not_found: 'Student could not be matched',
+  }
+  if (!reason) return 'No reason recorded'
+  return labels[reason] || reason.replaceAll('_', ' ').replace(/^./, c => c.toUpperCase())
+}
+
+const formatSessionType = (type) => ({
+  workshop: 'Workshop',
+  mentoring: 'Mentoring',
+  standup: 'Stand-up',
+  squad_meeting: 'Squad Meeting',
+  unknown: 'Unknown session type',
+})[type] || type?.replaceAll('_', ' ')
+
+const formatEligibilityStatus = (status) =>
+  status === 'unresolved' ? 'Unresolved' : 'Excluded'
 </script>
 
 <template>
@@ -119,6 +144,66 @@ const barColorClass = (iconColor) => {
         </div>
         <p class="text-xs text-muted mt-1">{{ stat.value }} / {{ stat.max }} (top attendee)</p>
       </UPageCard>
+    </div>
+
+    <div
+      v-if="!loading && !error && attendance?.audit?.uses_ledger"
+      class="mt-5 rounded-lg border border-default p-4 space-y-4"
+    >
+      <div>
+        <h4 class="text-sm font-semibold text-highlighted">Attendance audit</h4>
+        <p class="text-xs text-muted mt-1">
+          Verified attendance above remains the only source for current percentages and points.
+        </p>
+      </div>
+
+      <div>
+        <p class="text-sm font-medium text-highlighted">Historical legacy counters</p>
+        <p class="text-xs text-muted mb-2">
+          Historical and unverified; excluded from current attendance and points.
+        </p>
+        <div class="grid grid-cols-3 gap-3">
+          <div class="rounded-lg bg-elevated p-3">
+            <p class="text-xs text-muted">Workshops</p>
+            <p class="font-semibold">{{ attendance.audit.legacy.workshops ?? '—' }}</p>
+          </div>
+          <div class="rounded-lg bg-elevated p-3">
+            <p class="text-xs text-muted">Mentoring</p>
+            <p class="font-semibold">{{ attendance.audit.legacy.mentoring ?? '—' }}</p>
+          </div>
+          <div class="rounded-lg bg-elevated p-3">
+            <p class="text-xs text-muted">Stand-ups</p>
+            <p class="font-semibold">{{ attendance.audit.legacy.standups ?? '—' }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <p class="text-sm font-medium text-highlighted">Unverified submissions</p>
+          <UBadge color="warning" variant="subtle">
+            {{ attendance.audit.unverified_total }} records
+          </UBadge>
+        </div>
+        <p v-if="!attendance.audit.unverified_by_reason.length" class="text-sm text-muted">
+          No student-associated unverified submissions were found.
+        </p>
+        <div v-else class="divide-y divide-default">
+          <div
+            v-for="(item, index) in attendance.audit.unverified_by_reason"
+            :key="`${item.eligibility_status}-${item.reason}-${item.session_type}-${index}`"
+            class="py-3 flex flex-wrap justify-between gap-2"
+          >
+            <div>
+              <p class="text-sm font-medium text-highlighted">{{ formatAuditReason(item.reason) }}</p>
+              <p class="text-xs text-muted mt-1">
+                {{ formatEligibilityStatus(item.eligibility_status) }} · {{ formatSessionType(item.session_type) }}
+              </p>
+            </div>
+            <span class="text-sm font-semibold tabular-nums">{{ item.count }}</span>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
