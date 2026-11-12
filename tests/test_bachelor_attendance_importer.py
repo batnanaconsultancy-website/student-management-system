@@ -190,21 +190,20 @@ class EligibilityTests(unittest.TestCase):
         self.assertEqual(result["eligibility_status"], "eligible")
         self.assertEqual(result["points_awarded"], 1)
 
-    def test_blank_live_status_is_excluded(self):
+    def test_blank_live_status_does_not_block_points(self):
         result = classify_source_row(**{**self.base, "live_raw": ""})
-        self.assertEqual(result["eligibility_status"], "excluded")
-        self.assertEqual(result["exclusion_reason"], "live_status_blank")
-        self.assertEqual(result["points_awarded"], 0)
+        self.assertEqual(result["eligibility_status"], "eligible")
+        self.assertEqual(result["points_awarded"], 3)
 
-    def test_legacy_sheet_live_status_is_unavailable(self):
+    def test_legacy_sheet_without_live_status_earns_points(self):
         result = classify_source_row(**{**self.base, "live_raw": None, "live_available": False})
-        self.assertEqual(result["eligibility_status"], "excluded")
-        self.assertEqual(result["exclusion_reason"], "live_status_unavailable")
+        self.assertEqual(result["eligibility_status"], "eligible")
+        self.assertEqual(result["points_awarded"], 3)
 
-    def test_squad_meeting_is_retained_but_not_point_eligible(self):
+    def test_squad_meeting_earns_two_points(self):
         result = classify_source_row(**{**self.base, "type_raw": "Squad Meeting"})
-        self.assertEqual(result["eligibility_status"], "excluded")
-        self.assertEqual(result["exclusion_reason"], "session_type_not_points_eligible")
+        self.assertEqual(result["eligibility_status"], "eligible")
+        self.assertEqual(result["points_awarded"], 2)
 
     def test_future_session_date_is_excluded(self):
         from datetime import timedelta
@@ -232,7 +231,7 @@ class EligibilityTests(unittest.TestCase):
         self.assertEqual(result["eligibility_status"], "unresolved")
         self.assertEqual(result["exclusion_reason"], "student_email_ambiguous")
 
-    def test_unmatched_legacy_mentoring_record_is_not_guessed(self):
+    def test_legacy_sheet_mentoring_record_earns_three_points(self):
         result = classify_source_row(**{
             **self.base,
             "gid": 334409729,
@@ -241,9 +240,8 @@ class EligibilityTests(unittest.TestCase):
             "live_available": False,
             "date_raw": "06/01/2026",
         })
-        self.assertEqual(result["eligibility_status"], "excluded")
-        self.assertEqual(result["exclusion_reason"], "live_status_unavailable")
-        self.assertEqual(result["points_awarded"], 0)
+        self.assertEqual(result["eligibility_status"], "eligible")
+        self.assertEqual(result["points_awarded"], 3)
 
 
 if __name__ == "__main__":
