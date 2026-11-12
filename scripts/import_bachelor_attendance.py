@@ -102,6 +102,7 @@ def normalize_session_type(value: str | None) -> str:
         "stand up": "standup",
         "standup": "standup",
         "squad meeting": "squad_meeting",
+        "squadmeeting": "squad_meeting",
     }
     return aliases.get(normalized, "unknown")
 
@@ -276,27 +277,22 @@ def classify_source_row(
     if session_type == "unknown":
         result["exclusion_reason"] = "session_type_unrecognized"
         return result
-    if session_type == "squad_meeting":
-        result["exclusion_reason"] = "session_type_not_points_eligible"
-        return result
 
-    if live_status == "unavailable":
-        result["exclusion_reason"] = "live_status_unavailable"
-        return result
-    if live_status == "blank":
-        result["exclusion_reason"] = "live_status_blank"
-        return result
-    if live_status == "other":
-        result["exclusion_reason"] = "live_status_unrecognized"
-        return result
-
+    # Live-attendance confirmation is retained for audit purposes only.
+    # The approved points policy counts valid submitted records regardless
+    # of whether the live-status field is blank, unavailable, or non-Yes.
     if schedule_reason:
         result["exclusion_reason"] = schedule_reason
         return result
 
     result["eligibility_status"] = "eligible"
     result["exclusion_reason"] = None
-    result["points_awarded"] = 1 if session_type == "standup" else 3
+    result["points_awarded"] = {
+        "workshop": 3,
+        "mentoring": 3,
+        "squad_meeting": 2,
+        "standup": 1,
+    }[session_type]
     return result
 
 
@@ -504,6 +500,8 @@ def build_summary(
     live_counts: Counter[str] = Counter()
     eligibility_counts: Counter[str] = Counter()
     reason_counts: Counter[str] = Counter()
+    eligible_records_by_category: Counter[str] = Counter()
+    points_by_category: Counter[str] = Counter()
     cross_sheet_signatures: dict[int, set[tuple[Any, ...]]] = {}
     all_records = []
 
@@ -542,6 +540,10 @@ def build_summary(
             eligibility_counts[record["eligibility_status"]] += 1
             if record["exclusion_reason"]:
                 reason_counts[record["exclusion_reason"]] += 1
+            if record["eligibility_status"] == "eligible":
+                category = record["session_type"]
+                eligible_records_by_category[category] += 1
+                points_by_category[category] += record["points_awarded"]
             records.append(record)
             all_records.append(record)
         cross_sheet_signatures[source["gid"]] = signatures
@@ -571,6 +573,8 @@ def build_summary(
         "excluded_rows": eligibility_counts["excluded"],
         "unresolved_rows": eligibility_counts["unresolved"],
         "points_preview": sum(r["points_awarded"] for r in all_records),
+        "eligible_records_by_category": dict(sorted(eligible_records_by_category.items())),
+        "points_by_category": dict(sorted(points_by_category.items())),
         "cross_sheet_exact_signature_matches": cross_sheet_matches,
         "cross_sheet_matches_are_not_deduplicated": True,
         "by_sheet": by_sheet,
