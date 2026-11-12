@@ -32,6 +32,21 @@ interface AssessmentResponse {
         points: number
       }
       total_points: number
+      audit: {
+        uses_ledger: boolean
+        legacy: {
+          workshops: number | null
+          mentoring: number | null
+          standups: number | null
+        }
+        unverified_total: number
+        unverified_by_reason: Array<{
+          eligibility_status: 'excluded' | 'unresolved'
+          reason: string | null
+          session_type: string
+          count: number
+        }>
+      }
       target: number | null
       target_note: string
     }
@@ -85,6 +100,35 @@ const mediumStakes = computed(() => assessment.value?.medium_stakes)
 
 function formatProgress(value: number) {
   return `${Math.max(0, Math.min(100, value || 0)).toFixed(0)}%`
+}
+
+function formatAuditReason(reason: string | null) {
+  const labels: Record<string, string> = {
+    live_status_blank: 'Live attendance status was blank',
+    live_status_unavailable: 'Live-attendance field unavailable in source',
+    session_type_not_points_eligible: 'Session type does not count toward attendance points',
+    season_schedule_gap: 'No matching Season schedule',
+    session_date_in_future: 'Session date is in the future',
+    session_date_missing: 'Session date missing',
+    student_email_not_found: 'Student could not be matched',
+  }
+  if (!reason) return 'No reason recorded'
+  return labels[reason] || reason.replaceAll('_', ' ').replace(/^./, c => c.toUpperCase())
+}
+
+function formatSessionType(type: string) {
+  const labels: Record<string, string> = {
+    workshop: 'Workshop',
+    mentoring: 'Mentoring',
+    standup: 'Stand-up',
+    squad_meeting: 'Squad Meeting',
+    unknown: 'Unknown session type',
+  }
+  return labels[type] || type.replaceAll('_', ' ')
+}
+
+function formatEligibilityStatus(status: string) {
+  return status === 'unresolved' ? 'Unresolved' : 'Excluded'
 }
 </script>
 
@@ -206,6 +250,65 @@ function formatProgress(value: number) {
               <p class="text-xs text-muted mt-2">Sum of weighted category points</p>
             </UCard>
           </div>
+
+          <UCard v-if="lowStakes?.audit.uses_ledger">
+            <div class="space-y-4">
+              <div>
+                <h3 class="font-semibold text-highlighted">Attendance audit</h3>
+                <p class="text-sm text-muted mt-1">
+                  Verified attendance above is the only attendance used for percentages and points.
+                </p>
+              </div>
+
+              <div>
+                <h4 class="text-sm font-medium text-highlighted">Historical legacy counters</h4>
+                <p class="text-xs text-muted mb-2">
+                  Historical and unverified. These values are not added to current attendance or points.
+                </p>
+                <div class="grid grid-cols-3 gap-3">
+                  <div class="rounded-lg bg-elevated p-3">
+                    <p class="text-xs text-muted">Workshops</p>
+                    <p class="text-lg font-semibold">{{ lowStakes.audit.legacy.workshops ?? '—' }}</p>
+                  </div>
+                  <div class="rounded-lg bg-elevated p-3">
+                    <p class="text-xs text-muted">Mentoring</p>
+                    <p class="text-lg font-semibold">{{ lowStakes.audit.legacy.mentoring ?? '—' }}</p>
+                  </div>
+                  <div class="rounded-lg bg-elevated p-3">
+                    <p class="text-xs text-muted">Stand-ups</p>
+                    <p class="text-lg font-semibold">{{ lowStakes.audit.legacy.standups ?? '—' }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between gap-3 mb-2">
+                  <h4 class="text-sm font-medium text-highlighted">Unverified submissions</h4>
+                  <UBadge color="warning" variant="subtle">
+                    {{ lowStakes.audit.unverified_total }} records
+                  </UBadge>
+                </div>
+                <p v-if="!lowStakes.audit.unverified_by_reason.length" class="text-sm text-muted">
+                  No student-associated unverified submissions were found.
+                </p>
+                <div v-else class="divide-y divide-default">
+                  <div
+                    v-for="(item, index) in lowStakes.audit.unverified_by_reason"
+                    :key="`${item.eligibility_status}-${item.reason}-${item.session_type}-${index}`"
+                    class="py-3 flex flex-wrap items-start justify-between gap-2"
+                  >
+                    <div class="min-w-0">
+                      <p class="text-sm font-medium text-highlighted">{{ formatAuditReason(item.reason) }}</p>
+                      <p class="text-xs text-muted mt-1">
+                        {{ formatEligibilityStatus(item.eligibility_status) }} · {{ formatSessionType(item.session_type) }}
+                      </p>
+                    </div>
+                    <span class="text-sm font-semibold tabular-nums">{{ item.count }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </UCard>
 
           <UAlert
             color="info"
