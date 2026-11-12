@@ -102,17 +102,6 @@ export default defineEventHandler(async (event) => {
       },
       audit: {
         uses_ledger: Boolean(auditSummary?.uses_ledger),
-        legacy: {
-          workshops: auditSummary?.legacy_workshops == null
-            ? null
-            : Number(auditSummary.legacy_workshops),
-          mentoring: auditSummary?.legacy_mentoring == null
-            ? null
-            : Number(auditSummary.legacy_mentoring),
-          standups: auditSummary?.legacy_standups == null
-            ? null
-            : Number(auditSummary.legacy_standups),
-        },
         unverified_total: Number(auditSummary?.unverified_total || 0),
         unverified_by_reason: Array.isArray(auditSummary?.unverified_by_reason)
           ? auditSummary.unverified_by_reason

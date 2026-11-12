@@ -34,11 +34,6 @@ interface AssessmentResponse {
       total_points: number
       audit: {
         uses_ledger: boolean
-        legacy: {
-          workshops: number | null
-          mentoring: number | null
-          standups: number | null
-        }
         unverified_total: number
         unverified_by_reason: Array<{
           eligibility_status: 'excluded' | 'unresolved'
@@ -258,27 +253,6 @@ function formatEligibilityStatus(status: string) {
                 <p class="text-sm text-muted mt-1">
                   Verified attendance above is the only attendance used for percentages and points.
                 </p>
-              </div>
-
-              <div>
-                <h4 class="text-sm font-medium text-highlighted">Historical legacy counters</h4>
-                <p class="text-xs text-muted mb-2">
-                  Historical and unverified. These values are not added to current attendance or points.
-                </p>
-                <div class="grid grid-cols-3 gap-3">
-                  <div class="rounded-lg bg-elevated p-3">
-                    <p class="text-xs text-muted">Workshops</p>
-                    <p class="text-lg font-semibold">{{ lowStakes.audit.legacy.workshops ?? '—' }}</p>
-                  </div>
-                  <div class="rounded-lg bg-elevated p-3">
-                    <p class="text-xs text-muted">Mentoring</p>
-                    <p class="text-lg font-semibold">{{ lowStakes.audit.legacy.mentoring ?? '—' }}</p>
-                  </div>
-                  <div class="rounded-lg bg-elevated p-3">
-                    <p class="text-xs text-muted">Stand-ups</p>
-                    <p class="text-lg font-semibold">{{ lowStakes.audit.legacy.standups ?? '—' }}</p>
-                  </div>
-                </div>
               </div>
 
               <div>
