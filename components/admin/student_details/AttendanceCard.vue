@@ -158,27 +158,6 @@ const formatEligibilityStatus = (status) =>
       </div>
 
       <div>
-        <p class="text-sm font-medium text-highlighted">Historical legacy counters</p>
-        <p class="text-xs text-muted mb-2">
-          Historical and unverified; excluded from current attendance and points.
-        </p>
-        <div class="grid grid-cols-3 gap-3">
-          <div class="rounded-lg bg-elevated p-3">
-            <p class="text-xs text-muted">Workshops</p>
-            <p class="font-semibold">{{ attendance.audit.legacy.workshops ?? '—' }}</p>
-          </div>
-          <div class="rounded-lg bg-elevated p-3">
-            <p class="text-xs text-muted">Mentoring</p>
-            <p class="font-semibold">{{ attendance.audit.legacy.mentoring ?? '—' }}</p>
-          </div>
-          <div class="rounded-lg bg-elevated p-3">
-            <p class="text-xs text-muted">Stand-ups</p>
-            <p class="font-semibold">{{ attendance.audit.legacy.standups ?? '—' }}</p>
-          </div>
-        </div>
-      </div>
-
-      <div>
         <div class="flex items-center justify-between gap-2 mb-2">
           <p class="text-sm font-medium text-highlighted">Unverified submissions</p>
           <UBadge color="warning" variant="subtle">

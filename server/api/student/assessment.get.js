@@ -206,17 +206,6 @@ export default defineEventHandler(async (event) => {
 
     const attendanceAudit = {
       uses_ledger: Boolean(attendanceAuditSummary?.uses_ledger),
-      legacy: {
-        workshops: attendanceAuditSummary?.legacy_workshops == null
-          ? null
-          : Number(attendanceAuditSummary.legacy_workshops),
-        mentoring: attendanceAuditSummary?.legacy_mentoring == null
-          ? null
-          : Number(attendanceAuditSummary.legacy_mentoring),
-        standups: attendanceAuditSummary?.legacy_standups == null
-          ? null
-          : Number(attendanceAuditSummary.legacy_standups),
-      },
       unverified_total: Number(attendanceAuditSummary?.unverified_total || 0),
       unverified_by_reason: Array.isArray(attendanceAuditSummary?.unverified_by_reason)
         ? attendanceAuditSummary.unverified_by_reason
