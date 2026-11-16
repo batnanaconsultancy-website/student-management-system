@@ -50,3 +50,21 @@ jobs:
           SUPABASE_ROLE_KEY: ${{ secrets.SUPABASE_ROLE_KEY }}
         run: |
           python scripts/import_bachelor_attendance.py
+
+      - name: Run read-only Season attendance audit
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_ROLE_KEY: ${{ secrets.SUPABASE_ROLE_KEY }}
+        run: |
+          python scripts/audit_bachelor_attendance_by_season.py \
+            --report reports/bachelor-attendance-season-audit.json
+
+      - name: Upload aggregate Season audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bachelor-attendance-season-audit
+          path: reports/bachelor-attendance-season-audit.json
+          if-no-files-found: error
+          retention-days: 30
