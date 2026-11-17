@@ -22,6 +22,8 @@ interface RoadmapSeason {
   progress_percentage: string | number | null;
   description: string | null;
   projects: RoadmapProject[];
+  completed_project_count: number;
+  remaining_project_count: number;
 }
 
 interface RoadmapResponse {
@@ -169,22 +171,31 @@ const getProgressValue = (progress: string | number | null): number => {
                 </span>
               </div>
 
+              <div class="pt-2 space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="text-muted">Season Progress:</span>
+                  <span class="font-medium">
+                    {{ getProgressValue(season.progress_percentage) }}%
+                  </span>
+                </div>
+                <UProgress
+                  :model-value="getProgressValue(season.progress_percentage)"
+                />
+              </div>
+
               <div
                 v-if="season.is_completed && season.completion_date"
-                class="flex items-center justify-between pt-2"
+                class="flex items-center justify-between pt-1"
               >
-                <span class="text-muted">Completion:</span>
-
-                <UProgress
-                  v-if="season.name !== 'Final Project'"
-                  :model-value="getProgressValue(season.progress_percentage)"
-                  class="ml-6"
-                />
+                <span class="text-muted">Completed on:</span>
+                <span class="font-medium">
+                  {{ formatDate(season.completion_date) }}
+                </span>
               </div>
             </div>
 
             <!-- Projects Collapsible -->
-            <UCollapsible v-if="season.projects.length > 0" class="pt-2">
+            <UCollapsible class="pt-2">
               <UButton
                 color="neutral"
                 variant="ghost"
@@ -195,10 +206,12 @@ const getProgressValue = (progress: string | number | null): number => {
                   <span class="text-muted text-sm font-medium"> Projects </span>
 
                   <UBadge size="xs" color="neutral" variant="subtle">
-                    {{
-                      season.projects.filter((p) => p.is_completed).length
-                    }}/{{ season.projects.length }}
+                    {{ season.completed_project_count }}/{{ season.projects.length }}
                   </UBadge>
+                </span>
+                <span class="text-xs text-muted">
+                  {{ season.completed_project_count }} completed ·
+                  {{ season.remaining_project_count }} remaining
                 </span>
 
                 <UIcon
@@ -208,33 +221,48 @@ const getProgressValue = (progress: string | number | null): number => {
               </UButton>
 
               <template #content>
-                <ul class="mt-2 space-y-1.5 pl-2">
+                <p
+                  v-if="season.projects.length === 0"
+                  class="mt-2 text-sm text-muted"
+                >
+                  No projects are currently assigned to this season.
+                </p>
+
+                <ul v-else class="mt-2 space-y-2 pl-2">
                   <li
                     v-for="project in season.projects"
                     :key="project.id"
-                    class="flex items-center gap-2 text-sm"
+                    class="flex items-center justify-between gap-3 text-sm"
                   >
-                    <UIcon
-                      v-if="project.is_completed"
-                      name="i-lucide-circle-check"
-                      class="text-green-500 shrink-0 size-4"
-                    />
-
-                    <UIcon
-                      v-else
-                      name="i-lucide-circle"
-                      class="text-muted shrink-0 size-4"
-                    />
-
-                    <span
-                      :class="
-                        project.is_completed
-                          ? 'text-green-600 dark:text-green-400'
-                          : 'text-gray-700 dark:text-gray-300'
-                      "
-                    >
-                      {{ project.name }}
+                    <span class="flex items-center gap-2 min-w-0">
+                      <UIcon
+                        v-if="project.is_completed"
+                        name="i-lucide-circle-check"
+                        class="text-green-500 shrink-0 size-4"
+                      />
+                      <UIcon
+                        v-else
+                        name="i-lucide-circle"
+                        class="text-muted shrink-0 size-4"
+                      />
+                      <span
+                        :class="
+                          project.is_completed
+                            ? 'text-green-600 dark:text-green-400'
+                            : 'text-gray-700 dark:text-gray-300'
+                        "
+                      >
+                        {{ project.name }}
+                      </span>
                     </span>
+
+                    <UBadge
+                      :color="project.is_completed ? 'success' : 'warning'"
+                      variant="subtle"
+                      size="xs"
+                    >
+                      {{ project.is_completed ? "Completed" : "Remaining" }}
+                    </UBadge>
                   </li>
                 </ul>
               </template>

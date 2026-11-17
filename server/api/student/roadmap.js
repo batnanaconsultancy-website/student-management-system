@@ -9,23 +9,26 @@ export default defineEventHandler(async (event) => {
     const client = context.dataClient
     const studentData = context.student
 
-    // Get student season progress to determine which Season 03 track they're in
+    // Fetch the student's existing season progress.
     const { data: progressData, error: progressError } = await client
       .from('student_season_progress')
       .select('*, seasons(id, name)')
       .eq('student_id', studentData.id)
 
     if (progressError) {
-      throw createError({ statusCode: 500, statusMessage: progressError.message })
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Failed to load student season progress',
+      })
     }
 
-    // Find which Season 03 specialization the student has progress in
-    const season03Progress = (progressData || []).find(p =>
-      p.seasons?.name?.match(/^Season 03 Software Engineer/)
+    // Identify the student's Season 03 Software Engineering track, if applicable.
+    const season03Progress = (progressData || []).find((progress) =>
+      progress.seasons?.name?.match(/^Season 03 Software Engineer/),
     )
     const studentSeason03Track = season03Progress?.seasons?.name
 
-    // Get program cohort seasons
+    // Only return seasons scheduled for this student's cohort AND programme.
     const { data: cohortSeasons, error: seasonsError } = await client
       .from('program_cohort_seasons')
       .select(`
@@ -35,63 +38,87 @@ export default defineEventHandler(async (event) => {
         )
       `)
       .eq('cohort_id', studentData.cohort_id)
+      .eq('program_id', studentData.program_id)
       .order('start_date', { ascending: true })
 
     if (seasonsError) {
-      throw createError({ statusCode: 500, statusMessage: seasonsError.message })
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Failed to load scheduled programme seasons',
+      })
     }
 
-    // Fetch all projects for the student's program
-    const { data: projectsData } = await client
+    // Fetch all projects belonging to the student's programme.
+    const { data: projectsData, error: projectsError } = await client
       .from('projects')
       .select('id, name, season_id')
       .eq('program_id', studentData.program_id)
 
-    // Fetch student's completed projects
-    const { data: completedProjectsData } = await client
+    if (projectsError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Failed to load programme projects',
+      })
+    }
+
+    // Fetch completed project records for this student.
+    const { data: completedProjectsData, error: completionsError } = await client
       .from('student_project_completion')
       .select('project_id, is_completed')
       .eq('student_id', studentData.id)
       .eq('is_completed', true)
 
-    // Create a set of completed project IDs for quick lookup
+    if (completionsError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Failed to load student project completion records',
+      })
+    }
+
     const completedProjectIds = new Set(
-      (completedProjectsData || []).map(cp => cp.project_id)
+      (completedProjectsData || []).map((completion) => completion.project_id),
     )
 
-    // Filter out Season 03 tracks that don't match the student's track
+    // Preserve the existing Season 03 specialization filtering.
     const filteredSeasons = (cohortSeasons || []).filter((season) => {
       const seasonName = season.seasons?.name
       const isSeason03SE = seasonName?.match(/^Season 03 Software Engineer/)
 
-      // If it's a Season 03 SE track, only include it if it matches the student's track
       if (isSeason03SE) {
         return studentSeason03Track && seasonName === studentSeason03Track
       }
 
-      // Include all other seasons
       return true
     })
 
-    // Map seasons with progress and projects
     const seasons = filteredSeasons.map((season) => {
-      const progress = (progressData || []).find(p => p.season_id === season.season_id)
+      const progress = (progressData || []).find(
+        (item) => item.season_id === season.season_id,
+      )
 
-      // Get projects for this season and mark completion status
       const seasonProjects = (projectsData || [])
-        .filter(p => p.season_id === season.season_id)
-        .map(project => ({
+        .filter((project) => project.season_id === season.season_id)
+        .map((project) => ({
           ...project,
-          is_completed: completedProjectIds.has(project.id)
+          is_completed: completedProjectIds.has(project.id),
         }))
+
+      const completedProjectCount = seasonProjects.filter(
+        (project) => project.is_completed,
+      ).length
 
       return {
         ...season,
         name: season.seasons?.name || 'Season',
-        progress_percentage: progress?.progress_percentage || '0.00',
-        is_completed: isSeasonCompleted(progress?.progress_percentage, progress?.is_completed),
+        progress_percentage: progress?.progress_percentage ?? '0.00',
+        is_completed: isSeasonCompleted(
+          progress?.progress_percentage,
+          progress?.is_completed,
+        ),
         completion_date: progress?.completion_date || null,
-        projects: seasonProjects
+        projects: seasonProjects,
+        completed_project_count: completedProjectCount,
+        remaining_project_count: seasonProjects.length - completedProjectCount,
       }
     })
 
@@ -100,7 +127,7 @@ export default defineEventHandler(async (event) => {
     console.error('Student roadmap handler error:', err)
     throw createError({
       statusCode: err.statusCode || 500,
-      statusMessage: err?.message || 'Internal server error'
+      statusMessage: err.statusMessage || err.message || 'Internal server error',
     })
   }
 })
