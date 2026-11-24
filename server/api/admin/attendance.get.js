@@ -6,7 +6,16 @@ import {
 } from '#supabase/server'
 
 export default defineEventHandler(async (event) => {
-  const user = await serverSupabaseUser(event)
+  let user
+  try {
+    user = await serverSupabaseUser(event)
+  } catch (error) {
+    const message = String(error?.statusMessage || error?.message || '')
+    if (message === 'Auth session missing!') {
+      throw createError({ statusCode: 401, statusMessage: 'Not authenticated' })
+    }
+    throw error
+  }
 
   if (!user?.email) {
     throw createError({ statusCode: 401, statusMessage: 'Not authenticated' })
