@@ -63,9 +63,12 @@ export default defineEventHandler(async (event) => {
     "Loading Case Study Forum events",
   );
 
+  const canManageEvents = access.isAdmin || access.isAssessmentManager;
+
   const permissions = {
-    canCreateEvents: access.isAdmin || access.isAssessmentManager,
-    canReviewRecords: access.isAdmin || access.isAssessmentManager,
+    canCreateEvents: canManageEvents,
+    canReviewRecords: canManageEvents,
+    canDeleteEvents: canManageEvents,
     canSubmitRecords: true,
   };
 
