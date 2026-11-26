@@ -13,25 +13,62 @@ interface AssessmentResponse {
       cohort_name: string | null
     }
     low_stakes: {
+      uses_ledger: boolean
+      cohort_size: number
       workshops: {
         count: number
         max: number
         percent: number
-        points: number
+        points: number | null
       }
       mentoring: {
         count: number
         max: number
         percent: number
-        points: number
+        points: number | null
       }
       standups: {
         count: number
         max: number
         percent: number
-        points: number
+        points: number | null
       }
-      total_points: number
+      squad_meetings: {
+        count: number
+        max: number
+        percent: number
+        points: number | null
+      }
+      overall: {
+        count: number
+        max: number
+        percent: number
+      }
+      total_points: number | null
+      reporting_date: string | null
+      calendar_coverage_status: string | null
+      scheduled: {
+        workshops: {
+          attended: number | null
+          total: number | null
+          percent: number | null
+        }
+        mentoring: {
+          attended: number | null
+          total: number | null
+          percent: number | null
+        }
+        standups: {
+          attended: number | null
+          total: number | null
+          percent: number | null
+        }
+        squad_meetings: {
+          attended: number | null
+          total: number | null
+          percent: number | null
+        }
+      }
       audit: {
         uses_ledger: boolean
         unverified_total: number
@@ -185,15 +222,15 @@ function formatEligibilityStatus(status: string) {
           </div>
         </UCard>
 
-        <section class="space-y-3">
+        <section class="space-y-4">
           <div>
             <h2 class="text-lg font-semibold text-highlighted">Low-stakes evidence</h2>
             <p class="text-sm text-muted">
-              Recorded participation in workshops, mentoring and stand-ups.
-              Percentages compare your recorded attendance with the highest
-              count in your cohort for each category; they are not percentages
-              of all sessions offered. Points are calculated from these
-              percentages using the category weights.
+              Eligible attendance is recorded from the Bachelor attendance ledger.
+              Cohort-relative percentages compare your attendance count with the
+              highest count in your cohort; they do not represent the percentage
+              of scheduled sessions attended. Points are awarded at fixed rates
+              for each eligible attendance.
             </p>
           </div>
 
@@ -203,12 +240,15 @@ function formatEligibilityStatus(status: string) {
               <p class="text-2xl font-semibold">
                 {{ formatProgress(lowStakes?.workshops.percent ?? 0) }}
               </p>
-              <p class="text-sm font-medium mt-2">
-                {{ (lowStakes?.workshops.points ?? 0).toFixed(2) }} / 3.00 points
+              <p v-if="lowStakes?.workshops.points !== null && lowStakes?.workshops.points !== undefined"
+                 class="text-sm font-medium mt-2">
+                {{ lowStakes.workshops.points.toFixed(0) }} points
               </p>
               <p class="text-xs text-muted mt-1">
-                {{ lowStakes?.workshops.count ?? 0 }} / {{ lowStakes?.workshops.max ?? 0 }} attendances
+                {{ lowStakes?.workshops.count ?? 0 }} attendances ·
+                cohort reference {{ lowStakes?.workshops.max ?? 0 }}
               </p>
+              <p class="text-xs text-muted">3 points per eligible attendance</p>
             </UCard>
 
             <UCard>
@@ -216,12 +256,15 @@ function formatEligibilityStatus(status: string) {
               <p class="text-2xl font-semibold">
                 {{ formatProgress(lowStakes?.mentoring.percent ?? 0) }}
               </p>
-              <p class="text-sm font-medium mt-2">
-                {{ (lowStakes?.mentoring.points ?? 0).toFixed(2) }} / 3.00 points
+              <p v-if="lowStakes?.mentoring.points !== null && lowStakes?.mentoring.points !== undefined"
+                 class="text-sm font-medium mt-2">
+                {{ lowStakes.mentoring.points.toFixed(0) }} points
               </p>
               <p class="text-xs text-muted mt-1">
-                {{ lowStakes?.mentoring.count ?? 0 }} / {{ lowStakes?.mentoring.max ?? 0 }} attendances
+                {{ lowStakes?.mentoring.count ?? 0 }} attendances ·
+                cohort reference {{ lowStakes?.mentoring.max ?? 0 }}
               </p>
+              <p class="text-xs text-muted">3 points per eligible attendance</p>
             </UCard>
 
             <UCard>
@@ -229,21 +272,127 @@ function formatEligibilityStatus(status: string) {
               <p class="text-2xl font-semibold">
                 {{ formatProgress(lowStakes?.standups.percent ?? 0) }}
               </p>
-              <p class="text-sm font-medium mt-2">
-                {{ (lowStakes?.standups.points ?? 0).toFixed(2) }} / 1.00 points
+              <p v-if="lowStakes?.standups.points !== null && lowStakes?.standups.points !== undefined"
+                 class="text-sm font-medium mt-2">
+                {{ lowStakes.standups.points.toFixed(0) }} points
               </p>
               <p class="text-xs text-muted mt-1">
-                {{ lowStakes?.standups.count ?? 0 }} / {{ lowStakes?.standups.max ?? 0 }} attendances
+                {{ lowStakes?.standups.count ?? 0 }} attendances ·
+                cohort reference {{ lowStakes?.standups.max ?? 0 }}
               </p>
+              <p class="text-xs text-muted">1 point per eligible attendance</p>
             </UCard>
 
             <UCard>
-              <p class="text-sm text-muted">Total attendance points</p>
+              <p class="text-sm text-muted">Squad Meetings</p>
               <p class="text-2xl font-semibold">
-                {{ (lowStakes?.total_points ?? 0).toFixed(2) }} / 7.00
+                {{ formatProgress(lowStakes?.squad_meetings.percent ?? 0) }}
               </p>
-              <p class="text-xs text-muted mt-2">Sum of weighted category points</p>
+              <p v-if="lowStakes?.squad_meetings.points !== null && lowStakes?.squad_meetings.points !== undefined"
+                 class="text-sm font-medium mt-2">
+                {{ lowStakes.squad_meetings.points.toFixed(0) }} points
+              </p>
+              <p class="text-xs text-muted mt-1">
+                {{ lowStakes?.squad_meetings.count ?? 0 }} attendances ·
+                cohort reference {{ lowStakes?.squad_meetings.max ?? 0 }}
+              </p>
+              <p class="text-xs text-muted">2 points per eligible attendance</p>
             </UCard>
+          </div>
+
+          <UCard>
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="text-sm text-muted">All-time eligible attendance points</p>
+                <p class="text-2xl font-semibold">
+                  {{ lowStakes?.total_points == null
+                    ? 'Not available'
+                    : lowStakes.total_points.toLocaleString() }}
+                </p>
+                <p class="text-xs text-muted mt-1">
+                  Total awarded points from eligible attendance ledger records.
+                  This is not the six-month 140-point management-period result.
+                </p>
+              </div>
+              <div class="text-sm text-muted">
+                <p>Reporting date</p>
+                <p class="font-medium text-highlighted">
+                  {{ lowStakes?.reporting_date || 'Not available' }}
+                </p>
+              </div>
+            </div>
+          </UCard>
+
+          <div class="space-y-3">
+            <div>
+              <h3 class="font-semibold text-highlighted">Scheduled-session attendance</h3>
+              <p class="text-sm text-muted">
+                Attendance against scheduled opportunities through the reporting
+                date. Future calendar weeks are excluded. This measure is separate
+                from the cohort-relative percentages above.
+              </p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              <UCard>
+                <p class="text-sm text-muted">Workshops</p>
+                <template v-if="lowStakes && lowStakes.scheduled.workshops.percent != null">
+                  <p class="text-2xl font-semibold">
+                    {{ formatProgress(lowStakes.scheduled.workshops.percent ?? 0) }}
+                  </p>
+                  <p class="text-xs text-muted mt-1">
+                    {{ lowStakes.scheduled.workshops.attended }} attended /
+                    {{ lowStakes.scheduled.workshops.total }} scheduled
+                  </p>
+                </template>
+                <p v-else class="text-sm text-muted mt-2">Schedule coverage unavailable</p>
+              </UCard>
+
+              <UCard>
+                <p class="text-sm text-muted">Mentoring</p>
+                <template v-if="lowStakes && lowStakes.scheduled.mentoring.percent != null">
+                  <p class="text-2xl font-semibold">
+                    {{ formatProgress(lowStakes.scheduled.mentoring.percent ?? 0) }}
+                  </p>
+                  <p class="text-xs text-muted mt-1">
+                    {{ lowStakes.scheduled.mentoring.attended }} attended /
+                    {{ lowStakes.scheduled.mentoring.total }} scheduled
+                  </p>
+                </template>
+                <p v-else class="text-sm text-muted mt-2">Schedule coverage unavailable</p>
+              </UCard>
+
+              <UCard>
+                <p class="text-sm text-muted">Stand-ups</p>
+                <template v-if="lowStakes && lowStakes.scheduled.standups.percent != null">
+                  <p class="text-2xl font-semibold">
+                    {{ formatProgress(lowStakes.scheduled.standups.percent ?? 0) }}
+                  </p>
+                  <p class="text-xs text-muted mt-1">
+                    {{ lowStakes.scheduled.standups.attended }} attended /
+                    {{ lowStakes.scheduled.standups.total }} scheduled
+                  </p>
+                </template>
+                <p v-else class="text-sm text-muted mt-2">Schedule coverage unavailable</p>
+              </UCard>
+
+              <UCard>
+                <p class="text-sm text-muted">Squad Meetings</p>
+                <template v-if="lowStakes && lowStakes.scheduled.squad_meetings.percent != null">
+                  <p class="text-2xl font-semibold">
+                    {{ formatProgress(lowStakes.scheduled.squad_meetings.percent ?? 0) }}
+                  </p>
+                  <p class="text-xs text-muted mt-1">
+                    {{ lowStakes.scheduled.squad_meetings.attended }} attended /
+                    {{ lowStakes.scheduled.squad_meetings.total }} scheduled
+                  </p>
+                </template>
+                <p v-else class="text-sm text-muted mt-2">Schedule coverage unavailable</p>
+              </UCard>
+            </div>
+            <p class="text-xs text-muted">
+              Calendar coverage: {{ lowStakes?.calendar_coverage_status || 'Not available' }}
+            </p>
           </div>
 
           <UCard v-if="lowStakes?.audit.uses_ledger">
