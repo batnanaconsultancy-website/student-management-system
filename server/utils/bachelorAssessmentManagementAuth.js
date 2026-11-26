@@ -13,7 +13,20 @@ const ASSIGNMENT_PAGE_SIZE = 1000;
 // Other active teaching Faculty members are restricted to active assignments.
 // Examiner capability alone does not grant access.
 export async function requireBachelorAssessmentManagementAccess(event) {
-  const user = await serverSupabaseUser(event);
+  let user;
+
+  try {
+    user = await serverSupabaseUser(event);
+  } catch (error) {
+    if (error?.message === "Auth session missing!") {
+      throw createError({
+        statusCode: 401,
+        statusMessage: "Not authenticated",
+      });
+    }
+
+    throw error;
+  }
 
   if (!user?.email) {
     throw createError({
