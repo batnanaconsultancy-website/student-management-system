@@ -10,6 +10,8 @@ type StudentRow = {
   student_id: string
   name: string
   email: string
+  program_id: string
+  cohort_id: string
   program: string
   cohort: string
   attendance_points: number
@@ -81,6 +83,8 @@ const permissions = ref<ManagementPermissions>({
 })
 
 const selectedPeriod = ref('')
+const selectedProgramId = ref('')
+const selectedCohortId = ref('')
 const studentSearch = ref('')
 const recordSearch = ref('')
 
@@ -107,9 +111,50 @@ const reviewNote = ref('')
 const students = computed<StudentRow[]>(() => pointsResponse.value?.data || [])
 const period = computed(() => pointsResponse.value?.period || null)
 const target = computed(() => Number(pointsResponse.value?.target_points || 140))
-const studentCount = computed(() => Number(pointsResponse.value?.student_count || 0))
-const targetMetCount = computed(() => Number(pointsResponse.value?.target_met_count || 0))
-const targetNotMetCount = computed(() => Number(pointsResponse.value?.target_not_met_count || 0))
+
+const programOptions = computed(() => {
+  const options = new Map<string, string>()
+
+  for (const student of students.value) {
+    if (student.program_id) {
+      options.set(student.program_id, student.program || 'Unnamed programme')
+    }
+  }
+
+  return Array.from(options, ([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+})
+
+const cohortOptions = computed(() => {
+  const options = new Map<string, string>()
+
+  for (const student of students.value) {
+    if (
+      student.cohort_id &&
+      (!selectedProgramId.value || student.program_id === selectedProgramId.value)
+    ) {
+      options.set(student.cohort_id, student.cohort || 'Unnamed cohort')
+    }
+  }
+
+  return Array.from(options, ([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+})
+
+const scopedStudents = computed(() =>
+  students.value.filter(student =>
+    (!selectedProgramId.value || student.program_id === selectedProgramId.value) &&
+    (!selectedCohortId.value || student.cohort_id === selectedCohortId.value),
+  ),
+)
+
+const studentCount = computed(() => scopedStudents.value.length)
+const targetMetCount = computed(() =>
+  scopedStudents.value.filter(student => student.target_met).length,
+)
+const targetNotMetCount = computed(() =>
+  scopedStudents.value.filter(student => !student.target_met).length,
+)
 const pendingCount = computed(() =>
   events.value.reduce(
     (total, item) =>
@@ -119,18 +164,18 @@ const pendingCount = computed(() =>
 )
 
 const averagePoints = computed(() => {
-  if (!students.value.length) return 0
+  if (!scopedStudents.value.length) return 0
   return Math.round(
-    students.value.reduce((sum, student) => sum + student.total_points, 0) /
-      students.value.length,
+    scopedStudents.value.reduce((sum, student) => sum + student.total_points, 0) /
+      scopedStudents.value.length,
   )
 })
 
 const filteredStudents = computed(() => {
   const query = studentSearch.value.trim().toLowerCase()
-  if (!query) return students.value
+  if (!query) return scopedStudents.value
 
-  return students.value.filter(student =>
+  return scopedStudents.value.filter(student =>
     [
       student.name,
       student.email,
@@ -139,6 +184,10 @@ const filteredStudents = computed(() => {
     ].some(value => String(value || '').toLowerCase().includes(query)),
   )
 })
+
+function changeProgram() {
+  selectedCohortId.value = ''
+}
 
 const filteredEvents = computed(() => {
   const query = recordSearch.value.trim().toLowerCase()
@@ -472,23 +521,64 @@ onMounted(async () => {
             </p>
           </div>
 
-          <div class="flex items-center gap-2">
-            <label for="reporting-period" class="text-sm text-muted">Reporting period</label>
-            <select
-              id="reporting-period"
-              v-model="selectedPeriod"
-              class="min-w-64 rounded-md border border-default bg-default px-3 py-2 text-sm text-highlighted"
-              :disabled="loading || !periodOptions.length"
-              @change="changePeriod"
-            >
-              <option
-                v-for="option in periodOptions"
-                :key="option.value"
-                :value="option.value"
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="flex items-center gap-2">
+              <label for="assessment-programme" class="text-sm text-muted">Programme</label>
+              <select
+                id="assessment-programme"
+                v-model="selectedProgramId"
+                class="min-w-48 rounded-md border border-default bg-default px-3 py-2 text-sm text-highlighted"
+                :disabled="loading || !programOptions.length"
+                @change="changeProgram"
               >
-                {{ option.label }}
-              </option>
-            </select>
+                <option value="">All Programmes</option>
+                <option
+                  v-for="option in programOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <label for="assessment-cohort" class="text-sm text-muted">Cohort</label>
+              <select
+                id="assessment-cohort"
+                v-model="selectedCohortId"
+                class="min-w-40 rounded-md border border-default bg-default px-3 py-2 text-sm text-highlighted"
+                :disabled="loading || !cohortOptions.length"
+              >
+                <option value="">All Cohorts</option>
+                <option
+                  v-for="option in cohortOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <label for="reporting-period" class="text-sm text-muted">Reporting period</label>
+              <select
+                id="reporting-period"
+                v-model="selectedPeriod"
+                class="min-w-64 rounded-md border border-default bg-default px-3 py-2 text-sm text-highlighted"
+                :disabled="loading || !periodOptions.length"
+                @change="changePeriod"
+              >
+                <option
+                  v-for="option in periodOptions"
+                  :key="option.value"
+                  :value="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
           </div>
         </div>
 
