@@ -90,7 +90,7 @@ export default defineEventHandler(async (event) => {
         .eq('archived', false)
         .maybeSingle(),
 
-      authenticatedClient.rpc('get_assessment_student_attendance', {
+      authenticatedClient.rpc('get_assessment_student_attendance_v2', {
         p_student_id: studentId,
       }),
 
@@ -174,35 +174,89 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    const calculatePoints = (percent, maximum) =>
-      Number((Number(percent || 0) / 100 * maximum).toFixed(2))
+    const toNumber = value => Number(value ?? 0)
+    const toNullableNumber = value =>
+      value == null ? null : Number(value)
+
+    const usesLedger = Boolean(attendanceSummary.uses_ledger)
 
     const attendance = {
+      uses_ledger: usesLedger,
+      cohort_size: toNumber(attendanceSummary.cohort_size),
+
       workshops: {
-        count: Number(attendanceSummary.workshops || 0),
-        max: Number(attendanceSummary.workshops_max || 0),
-        percent: Number(attendanceSummary.workshops_percent || 0),
-        points: calculatePoints(attendanceSummary.workshops_percent, 3),
+        count: toNumber(attendanceSummary.workshops),
+        max: toNumber(attendanceSummary.workshops_max),
+        percent: toNumber(attendanceSummary.workshops_percent),
+        points: usesLedger
+          ? toNumber(attendanceSummary.workshops) * 3
+          : null,
       },
+
       mentoring: {
-        count: Number(attendanceSummary.mentoring || 0),
-        max: Number(attendanceSummary.mentoring_max || 0),
-        percent: Number(attendanceSummary.mentoring_percent || 0),
-        points: calculatePoints(attendanceSummary.mentoring_percent, 3),
+        count: toNumber(attendanceSummary.mentoring),
+        max: toNumber(attendanceSummary.mentoring_max),
+        percent: toNumber(attendanceSummary.mentoring_percent),
+        points: usesLedger
+          ? toNumber(attendanceSummary.mentoring) * 3
+          : null,
       },
+
       standups: {
-        count: Number(attendanceSummary.standups || 0),
-        max: Number(attendanceSummary.standups_max || 0),
-        percent: Number(attendanceSummary.standups_percent || 0),
-        points: calculatePoints(attendanceSummary.standups_percent, 1),
+        count: toNumber(attendanceSummary.standups),
+        max: toNumber(attendanceSummary.standups_max),
+        percent: toNumber(attendanceSummary.standups_percent),
+        points: usesLedger
+          ? toNumber(attendanceSummary.standups)
+          : null,
+      },
+
+      squad_meetings: {
+        count: toNumber(attendanceSummary.squad_meetings),
+        max: toNumber(attendanceSummary.squad_meetings_max),
+        percent: toNumber(attendanceSummary.squad_meetings_percent),
+        points: usesLedger
+          ? toNumber(attendanceSummary.squad_meetings) * 2
+          : null,
+      },
+
+      overall: {
+        count: toNumber(attendanceSummary.overall),
+        max: toNumber(attendanceSummary.overall_max),
+        percent: toNumber(attendanceSummary.overall_percent),
+      },
+
+      // Authoritative all-time total from eligible attendance ledger records.
+      total_points: toNullableNumber(attendanceSummary.actual_points),
+
+      reporting_date: attendanceSummary.reporting_date || null,
+      calendar_coverage_status:
+        attendanceSummary.calendar_coverage_status || null,
+
+      // Scheduled-session attendance is separate from cohort-relative percentages.
+      scheduled: {
+        workshops: {
+          attended: toNullableNumber(attendanceSummary.scheduled_workshops_attended),
+          total: toNullableNumber(attendanceSummary.scheduled_workshops_total),
+          percent: toNullableNumber(attendanceSummary.scheduled_workshops_percent),
+        },
+        mentoring: {
+          attended: toNullableNumber(attendanceSummary.scheduled_mentoring_attended),
+          total: toNullableNumber(attendanceSummary.scheduled_mentoring_total),
+          percent: toNullableNumber(attendanceSummary.scheduled_mentoring_percent),
+        },
+        standups: {
+          attended: toNullableNumber(attendanceSummary.scheduled_standups_attended),
+          total: toNullableNumber(attendanceSummary.scheduled_standups_total),
+          percent: toNullableNumber(attendanceSummary.scheduled_standups_percent),
+        },
+        squad_meetings: {
+          attended: toNullableNumber(attendanceSummary.scheduled_squad_meetings_attended),
+          total: toNullableNumber(attendanceSummary.scheduled_squad_meetings_total),
+          percent: toNullableNumber(attendanceSummary.scheduled_squad_meetings_percent),
+        },
       },
     }
-
-    attendance.total_points = Number((
-      attendance.workshops.points +
-      attendance.mentoring.points +
-      attendance.standups.points
-    ).toFixed(2))
 
     const attendanceAudit = {
       uses_ledger: Boolean(attendanceAuditSummary?.uses_ledger),
