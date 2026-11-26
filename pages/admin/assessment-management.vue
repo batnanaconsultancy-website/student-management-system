@@ -175,11 +175,19 @@ function amsterdamToday() {
   return `${values.year}-${values.month}-${values.day}`
 }
 
-function previousPeriodStart(start: string) {
+function currentPeriodStart() {
+  const [year, month] = amsterdamToday().split('-').map(Number)
+
+  if (month >= 4 && month <= 9) return `${year}-04-01`
+  if (month >= 10) return `${year}-10-01`
+  return `${year - 1}-10-01`
+}
+
+function nextPeriodStart(start: string) {
   const [year, month] = start.split('-').map(Number)
   return month === 4
-    ? `${year - 1}-10-01`
-    : `${year}-04-01`
+    ? `${year}-10-01`
+    : `${year + 1}-04-01`
 }
 
 function periodLabel(start: string) {
@@ -192,12 +200,14 @@ function periodLabel(start: string) {
 const periodOptions = computed(() => {
   if (!period.value?.startDate) return []
 
+  const firstPeriod = '2023-04-01'
+  const currentPeriod = currentPeriodStart()
   const options: Array<{ label: string; value: string }> = []
-  let cursor = period.value.startDate
+  let cursor = firstPeriod
 
-  for (let index = 0; index < 8; index += 1) {
+  while (cursor <= currentPeriod) {
     options.push({ label: periodLabel(cursor), value: cursor })
-    cursor = previousPeriodStart(cursor)
+    cursor = nextPeriodStart(cursor)
   }
 
   return options
