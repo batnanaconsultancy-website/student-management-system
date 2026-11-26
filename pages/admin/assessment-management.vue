@@ -66,6 +66,7 @@ type ForumEvent = {
 type ManagementPermissions = {
   canCreateEvents: boolean
   canReviewRecords: boolean
+  canDeleteEvents: boolean
   canSubmitRecords: boolean
 }
 
@@ -79,6 +80,7 @@ const events = ref<ForumEvent[]>([])
 const permissions = ref<ManagementPermissions>({
   canCreateEvents: false,
   canReviewRecords: false,
+  canDeleteEvents: false,
   canSubmitRecords: false,
 })
 
@@ -307,6 +309,7 @@ async function loadEvents() {
   permissions.value = response.permissions || {
     canCreateEvents: false,
     canReviewRecords: false,
+    canDeleteEvents: false,
     canSubmitRecords: false,
   }
 }
@@ -377,6 +380,44 @@ async function createEvent() {
       error?.data?.statusMessage ||
       error?.statusMessage ||
       'Unable to create the event.'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function deleteEvent(item: ForumEvent) {
+  const originalEvent = events.value.find(event => event.id === item.id)
+  const recordCount = originalEvent?.records.length ?? item.records.length
+
+  const confirmed = window.confirm(
+    `Delete the Case Study Forum event "${item.event_title}" (${formatDate(item.event_date)})?\n\n` +
+    `${recordCount} associated participation record(s) will also be permanently deleted, including pending, verified, and rejected records.\n\n` +
+    `Any verified forum points awarded to affected students will be removed from their totals.\n\n` +
+    `The audit history of this deletion will be retained. This action cannot be undone.`
+  )
+
+  if (!confirmed) return
+
+  saving.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+
+  try {
+    const response: any = await $fetch(
+      `/api/assessment-management/events/${item.id}`,
+      { method: 'DELETE' }
+    )
+
+    await loadAll(selectedPeriod.value)
+
+    const deletedCount = response?.data?.deleted_record_count ?? recordCount
+    successMessage.value =
+      `Case Study Forum event "${item.event_title}" and ${deletedCount} participation record(s) deleted. Audit history retained.`
+  } catch (error: any) {
+    errorMessage.value =
+      error?.data?.statusMessage ||
+      error?.statusMessage ||
+      'Unable to delete the Case Study Forum event.'
   } finally {
     saving.value = false
   }
@@ -869,9 +910,22 @@ onMounted(async () => {
                     {{ item.description }}
                   </p>
                 </div>
-                <UBadge color="neutral" variant="subtle">
-                  {{ item.records.length }} visible records
-                </UBadge>
+                <div class="flex flex-wrap items-center gap-2">
+                  <UBadge color="neutral" variant="subtle">
+                    {{ item.records.length }} visible records
+                  </UBadge>
+                  <UButton
+                    v-if="permissions.canDeleteEvents"
+                    label="Delete event"
+                    color="error"
+                    variant="outline"
+                    icon="i-lucide-trash-2"
+                    size="sm"
+                    :loading="saving"
+                    :disabled="saving"
+                    @click="deleteEvent(item)"
+                  />
+                </div>
               </div>
 
               <div v-if="!item.records.length" class="p-4 text-sm text-muted">
