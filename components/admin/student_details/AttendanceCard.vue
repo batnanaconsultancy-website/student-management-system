@@ -126,6 +126,7 @@ watch(
 const lowStakes = computed(() => attendance.value?.low_stakes || null)
 const metrics = computed(() => attendance.value?.attendance || null)
 const audit = computed(() => attendance.value?.audit || null)
+const engagement = computed(() => attendance.value?.engagement || null)
 
 const cohortStats = computed(() => {
   if (!metrics.value) return []
@@ -361,6 +362,64 @@ function coverageLabel(status) {
         <p class="mt-2 text-xs text-muted">
           Future calendar weeks are excluded from scheduled opportunities.
           {{ coverageLabel(metrics.calendar_coverage_status) }}.
+        </p>
+      </div>
+
+      <div v-if="engagement" class="rounded-lg border border-default p-4 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h4 class="text-sm font-semibold text-highlighted">
+              Student engagement assessment
+            </h4>
+            <p class="mt-1 text-xs text-muted">
+              Based on comparable measures through {{ formatDate(engagement.reporting_date) }}.
+            </p>
+          </div>
+          <UBadge
+            :color="engagement.available ? 'info' : 'neutral'"
+            variant="subtle"
+          >
+            {{ engagement.classification.label }}
+          </UBadge>
+        </div>
+
+        <p class="text-sm text-muted">
+          {{ engagement.classification.description }}
+        </p>
+
+        <div v-if="engagement.available" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="rounded-md bg-elevated/50 p-3">
+            <p class="text-xs font-medium uppercase text-muted">
+              Scheduled attendance
+            </p>
+            <p class="mt-1 text-xl font-semibold text-highlighted">
+              {{ formatPercent(engagement.scheduled_attendance.percent) }}
+            </p>
+            <p class="mt-1 text-xs text-muted">
+              {{ formatCount(engagement.scheduled_attendance.attended) }} /
+              {{ formatCount(engagement.scheduled_attendance.total) }} scheduled opportunities
+            </p>
+          </div>
+
+          <div class="rounded-md bg-elevated/50 p-3">
+            <p class="text-xs font-medium uppercase text-muted">
+              Cohort-relative attendance
+            </p>
+            <p class="mt-1 text-xl font-semibold text-highlighted">
+              {{ formatPercent(engagement.cohort_relative.percent) }}
+            </p>
+            <p class="mt-1 text-xs text-muted">
+              {{ formatCount(engagement.cohort_relative.attended) }} /
+              {{ formatCount(engagement.cohort_relative.max) }} cohort maximum ·
+              {{ formatCount(engagement.cohort_relative.cohort_size) }} students
+            </p>
+          </div>
+        </div>
+
+        <p class="text-xs text-muted">
+          High engagement is 75% or above on each measure. This is an engagement
+          indicator for review, not an academic progression decision or an automatic
+          at-risk classification.
         </p>
       </div>
 

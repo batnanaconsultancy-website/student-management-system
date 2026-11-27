@@ -8,6 +8,9 @@ import {
   getCurrentPeriodStart,
   getPeriodBounds,
 } from "~/server/utils/bachelorAssessmentPoints";
+import {
+  calculateStudentEngagement,
+} from "~/server/utils/studentEngagementAssessment";
 
 const BACHELOR_PROGRAM_IDS = [
   "bd715dd5-dc5a-414a-98f9-660274fd60e0",
@@ -108,13 +111,18 @@ export default defineEventHandler(async (event) => {
 
     // These RPCs return one student's attendance summary and audit.
     // The service-role calls are made only after the admin check above.
-    const [attendanceResult, auditResult] = await Promise.all([
+    const [attendanceResult, auditResult, engagementResult] = await Promise.all([
       service.rpc("get_assessment_student_attendance_v2", {
         p_student_id: studentId,
       }),
       service.rpc("get_assessment_student_attendance_audit", {
         p_student_id: studentId,
       }),
+      isBachelor
+        ? service.rpc("get_bachelor_engagement_cohort_attendance", {
+            p_student_id: studentId,
+          })
+        : Promise.resolve({ data: null, error: null }),
     ]);
 
     if (attendanceResult.error) {
@@ -125,6 +133,11 @@ export default defineEventHandler(async (event) => {
       mapRpcError(auditResult.error, "attendance audit");
     }
 
+    if (engagementResult.error) {
+      mapRpcError(engagementResult.error, "engagement cohort comparison");
+    }
+
+    const engagementSummary = engagementResult.data?.[0];
     const summary = attendanceResult.data?.[0];
     const auditSummary = auditResult.data?.[0];
 
@@ -280,11 +293,37 @@ export default defineEventHandler(async (event) => {
       },
     };
 
+    if (isBachelor && !engagementSummary) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: "Student engagement comparison returned no result.",
+      });
+    }
+
+    // Always return an engagement result so non-Bachelor programmes
+    // explicitly display insufficient data rather than hiding the panel.
+    // The Bachelor-only cohort RPC is never called for other programmes.
+    const engagement = calculateStudentEngagement({
+      usesLedger: isBachelor && usesLedger,
+      calendarCoverageStatus: summary.calendar_coverage_status || null,
+      reportingDate: summary.reporting_date || null,
+      cohortRelative: isBachelor
+        ? {
+            reporting_date: engagementSummary.reporting_date || null,
+            cohort_size: engagementSummary.cohort_size,
+            student_eligible_sessions: engagementSummary.student_eligible_sessions,
+            cohort_max_eligible_sessions: engagementSummary.cohort_max_eligible_sessions,
+          }
+        : null,
+      scheduled: attendance.scheduled,
+    });
+
     return {
       student_id: studentId,
       program_id: student.program_id,
       period,
       low_stakes: lowStakes,
+      engagement,
       attendance,
       audit: {
         uses_ledger: Boolean(auditSummary.uses_ledger),
