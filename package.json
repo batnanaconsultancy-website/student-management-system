@@ -9,7 +9,8 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
-    "update-slack-ids": "node scripts/update_slack_ids.js"
+    "update-slack-ids": "node scripts/update_slack_ids.js",
+    "test:canvas-ai-grader": "node --test tests/canvas-ai-grader.test.js"
   },
   "dependencies": {
     "@nuxt/fonts": "^0.11.4",

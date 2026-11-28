@@ -1,5 +1,5 @@
 import { createError } from 'h3'
-import { serverSupabaseClient, serverSupabaseUser } from '#supabase/server'
+import { serverSupabaseClient, serverSupabaseServiceRole, serverSupabaseUser } from '#supabase/server'
 import { writeAuditLog } from '~/server/utils/auditLog'
 import { syncCanvasCourse } from '~/server/utils/canvasSync'
 
@@ -33,14 +33,38 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: 'Admin access required' })
   }
 
+  const serviceRole = await serverSupabaseServiceRole(event)
   const body = await readBody(event)
   const canvasCourseId = Number(body?.canvasCourseId)
   if (!canvasCourseId || Number.isNaN(canvasCourseId)) {
     throw createError({ statusCode: 400, statusMessage: 'canvasCourseId is required' })
   }
 
+  const { data: job, error: jobError } = await serviceRole
+    .from('canvas_sync_jobs')
+    .insert({
+      canvas_course_id: canvasCourseId,
+      job_type: 'course_sync',
+      status: 'processing',
+      requested_by: user.email,
+      attempts: 1,
+      locked_at: new Date().toISOString(),
+      locked_by: 'admin-request',
+    })
+    .select('id')
+    .single()
+  if (jobError) throw createError({ statusCode: 500, statusMessage: jobError.message })
+
   try {
-    const summary = await syncCanvasCourse(supabase, canvasCourseId)
+    const summary = await syncCanvasCourse(serviceRole, canvasCourseId)
+
+    await serviceRole.from('canvas_sync_jobs').update({
+      status: 'completed',
+      result: summary,
+      locked_at: null,
+      locked_by: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', job.id)
 
     await writeAuditLog(supabase, user.email, 'sync_canvas_course', 'canvas_course', canvasCourseId,
       {
@@ -55,6 +79,14 @@ export default defineEventHandler(async (event) => {
 
     return { data: summary }
   } catch (err) {
+    await serviceRole.from('canvas_sync_jobs').update({
+      status: 'failed',
+      last_error: String(err.message || 'Canvas sync failed').slice(0, 4000),
+      locked_at: null,
+      locked_by: null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', job.id)
+
     if (err.statusCode) throw err
     throw createError({ statusCode: 500, statusMessage: err.message || 'Canvas sync failed' })
   }

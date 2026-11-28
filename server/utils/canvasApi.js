@@ -99,76 +99,36 @@ async function getAllPages(cfg, path, query = {}) {
   return results;
 }
 
-/**
- * Courses the configured Canvas token has teacher/TA/designer access to.
- * Used to populate the course dropdown on the admin Canvas page.
- */
-/**
- * Courses the configured Canvas token has teacher/TA/designer access to.
- * Used to populate the course dropdown on the admin Canvas page.
- *
- * Canvas's /courses endpoint only accepts a single `enrollment_type`
- * value per request (unlike `state[]`, which does accept an array) --
- * passing it as an array causes Canvas's own API to 500. So this calls
- * once per type and merges + dedupes the results by course id.
- */
-/**
- * Courses the configured Canvas token has teacher/TA/designer access to,
- * PLUS any course IDs manually listed in CANVAS_EXTRA_COURSE_IDS (comma
- * separated env var). The extra list exists because an account-admin
- * Canvas token can often view/manage any course but isn't personally
- * "enrolled" in most of them, so Canvas's own enrollment-based course
- * list won't include those courses even though the token can access
- * them directly by ID. Used to populate the course dropdown.
+/** Discover every Canvas course visible under the configured account.
+ * Programme scope and assessment assignment selection are configured in SIS.
  */
 export async function listCanvasCourses() {
   const cfg = getConfig();
   assertConfigured(cfg);
-
-  const enrollmentTypes = ["teacher", "ta", "designer"];
-  const coursesById = new Map();
-
-  for (const enrollmentType of enrollmentTypes) {
-    const courses = await getAllPages(cfg, "/courses", {
-      enrollment_type: enrollmentType,
-      per_page: 100,
-      "state[]": ["available", "completed"],
-    });
-    for (const c of courses) {
-      if (c && !c.access_restricted_by_date) {
-        coursesById.set(c.id, c);
-      }
-    }
-  }
-
-  // Manually-listed extra course IDs, fetched directly (works even
-  // without a teacher/TA enrollment, as long as the token can view
-  // the course at all -- e.g. an account-level admin token).
   const config = useRuntimeConfig();
-  const extraIds = (config.canvasExtraCourseIds || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const accountId = config.canvasAccountId || "self";
 
-  for (const id of extraIds) {
-    if (coursesById.has(Number(id))) continue; // already have it
-    try {
-      const course = await getCanvasCourse(id);
-      if (course && !course.errors) {
-        coursesById.set(course.id, course);
-      }
-    } catch (err) {
-      // Don't let one bad/inaccessible ID break the whole dropdown --
-      // just skip it silently, it'll simply be missing from the list.
-    }
-  }
+  // Account-level discovery returns every course visible to this token,
+  // including courses where the token has no personal teacher enrollment.
+  // Assessment scope is configured separately in SIS; course metadata
+  // must never implicitly classify a course as Bachelor or Masters.
+  const courses = await getAllPages(cfg, `/accounts/${accountId}/courses`, {
+    per_page: 100,
+  });
 
-  return [...coursesById.values()]
-    .map((c) => ({
-      id: c.id,
-      name: c.name,
-      course_code: c.course_code,
-      term: c.term?.name || null,
+  return courses
+    .filter((course) => course && course.id)
+    .map((course) => ({
+      id: Number(course.id),
+      name: course.name || `Course ${course.id}`,
+      course_code: course.course_code || null,
+      account_id: course.account_id ?? null,
+      workflow_state: course.workflow_state || null,
+      enrollment_term_id: course.enrollment_term_id ?? null,
+      start_at: course.start_at || null,
+      end_at: course.end_at || null,
+      term: course.term?.name || null,
+      metadata: course,
     }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 }
@@ -223,8 +183,75 @@ export async function listAssignmentSubmissions(courseId, assignmentId) {
   return getAllPages(
     cfg,
     `/courses/${courseId}/assignments/${assignmentId}/submissions`,
-    { "include[]": ["user"], per_page: 100 },
+    { "include[]": ["user", "submission_history"], per_page: 100 },
   );
+}
+
+/**
+ * Downloads a Canvas file only when its URL belongs to the configured
+ * Canvas host. This prevents a Canvas-provided attachment URL from being
+ * used as an arbitrary server-side fetch target.
+ */
+export async function downloadCanvasAttachment(fileUrl) {
+  const cfg = getConfig()
+  assertConfigured(cfg)
+  let parsed
+  try {
+    parsed = new URL(fileUrl)
+  } catch {
+    throw new Error('Canvas attachment URL is invalid')
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== cfg.domain) {
+    throw new Error('Canvas attachment host does not match the configured Canvas domain')
+  }
+
+  const response = await fetch(parsed.toString(), {
+    headers: { Authorization: `Bearer ${cfg.token}` },
+    redirect: 'follow',
+  })
+  if (!response.ok) {
+    const error = new Error(`Canvas attachment download failed (${response.status})`)
+    error.statusCode = response.status
+    throw error
+  }
+  const bytes = Buffer.from(await response.arrayBuffer())
+  return {
+    bytes,
+    contentType: response.headers.get('content-type') || 'application/octet-stream',
+    size: bytes.length,
+  }
+}
+
+/**
+ * Publishes an Examiner-approved score to Canvas. This is called only
+ * from the explicit Examiner publish action, never by the AI worker.
+ */
+export async function publishCanvasGrade(courseId, assignmentId, canvasUserId, postedGrade, comment = null) {
+  const cfg = getConfig()
+  assertConfigured(cfg)
+  const body = new URLSearchParams()
+  body.set('submission[posted_grade]', String(postedGrade))
+  if (comment) body.set('comment[text_comment]', String(comment))
+
+  const response = await fetch(
+    `https://${cfg.domain}/api/v1/courses/${courseId}/assignments/${assignmentId}/submissions/${canvasUserId}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${cfg.token}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+    },
+  )
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => '')
+    const error = new Error(`Canvas grade publish failed (${response.status}): ${message.slice(0, 300)}`)
+    error.statusCode = response.status
+    throw error
+  }
+  return response.json()
 }
 
 export function isCanvasConfigured() {

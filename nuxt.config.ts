@@ -1,4 +1,4 @@
-﻿import tailwindcss from "@tailwindcss/vite";
+import tailwindcss from "@tailwindcss/vite";
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
@@ -54,7 +54,9 @@ export default defineNuxtConfig({
     canvasDomain: process.env.CANVAS_DOMAIN,
     canvasToken: process.env.CANVAS_TOKEN,
     canvasAccountId: process.env.CANVAS_ACCOUNT_ID,
-    canvasExtraCourseIds: process.env.CANVAS_EXTRA_COURSE_IDS,
+    openaiApiKey: process.env.OPENAI_API_KEY,
+    openaiModel: process.env.OPENAI_MODEL || "gpt-6.2-sol",
+    canvasAiWorkerSecret: process.env.CANVAS_AI_WORKER_SECRET,
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     gmailRefreshToken: process.env.GMAIL_REFRESH_TOKEN,
     googleRefreshToken: process.env.GOOGLE_REFRESH_TOKEN,
