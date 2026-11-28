@@ -281,3 +281,8 @@ reflect it right away).
 - Submission "Status" in the table is Canvas's own `workflow_state`
   (`unsubmitted`, `submitted`, `graded`, `pending_review`), plus a separate
   "late" badge when applicable.
+
+
+## Canvas AI Grader
+
+Implementation and rollout notes for the Canvas Bachelor / Masters AI Grader are in [`docs/CANVAS-AI-GRADER.md`](docs/CANVAS-AI-GRADER.md). The feature uses the existing Admin Canvas page and Examiner dashboard; its database migration is additive and must be reviewed/applied separately.

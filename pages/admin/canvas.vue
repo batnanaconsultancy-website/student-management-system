@@ -30,7 +30,156 @@ const search = ref('')
 const sortKey = ref('student_name')
 const sortDir = ref<'asc' | 'desc'>('asc')
 
-const activeTab = ref<'submissions' | 'matrix'>('submissions')
+const activeTab = ref<'submissions' | 'matrix' | 'assessment'>('submissions')
+
+// Canvas Bachelor / Masters assessment configuration. Course discovery is
+// intentionally separate from assessment selection; assignments start
+// unselected unless explicitly configured (Masters legacy rows are seeded).
+const assessmentScope = ref<'canvas_bachelor' | 'canvas_masters'>('canvas_bachelor')
+const assessmentCourseId = ref<number | null>(null)
+const assessmentCourseEnabled = ref(false)
+const assessmentAssignments = ref<any[]>([])
+const assessmentExaminers = ref<any[]>([])
+const assessmentExaminerScopes = ref<any[]>([])
+const assessmentConfigLoading = ref(false)
+const assessmentAssignmentsLoading = ref(false)
+const assessmentSaveBusy = ref<string | null>(null)
+
+async function fetchAssessmentConfig() {
+  assessmentConfigLoading.value = true
+  try {
+    const [configRes, courseRes] = await Promise.all([
+      $fetch('/api/admin/canvas/assessment-config'),
+      courses.value.length ? Promise.resolve({ data: courses.value }) : $fetch('/api/admin/canvas/courses'),
+    ])
+    if (!courses.value.length) courses.value = courseRes?.data || []
+    assessmentCourseRows.value = configRes?.data?.courses || []
+    assessmentExaminers.value = configRes?.data?.examiners || []
+    assessmentExaminerScopes.value = configRes?.data?.examinerScopes || []
+    syncAssessmentCourseState()
+  } catch (err: any) {
+    showError('Could not load assessment configuration', err?.data?.statusMessage || err.message)
+  } finally {
+    assessmentConfigLoading.value = false
+  }
+}
+
+function syncAssessmentCourseState() {
+  const row = assessmentCourseRows.value.find((item: any) =>
+    item.scope === assessmentScope.value && item.canvas_course_id === assessmentCourseId.value
+  )
+  assessmentCourseEnabled.value = Boolean(row?.is_enabled)
+}
+
+const assessmentCourseRows = ref<any[]>([])
+const existingMastersCourseIds = new Set([201, 328, 385, 421, 427, 432, 434, 443, 447, 548])
+const assessmentCourseItems = computed(() => courses.value
+  .filter((c) => assessmentScope.value !== 'canvas_bachelor' || !existingMastersCourseIds.has(Number(c.id)))
+  .map((c) => ({
+    label: c.name,
+    description: c.course_code || `Canvas course ${c.id}`,
+    value: c.id,
+  })))
+const selectedAssessmentAssignmentCount = computed(() => assessmentAssignments.value.filter((a) => a.isAssessment).length)
+const assessmentScopeItems = [
+  { label: 'Canvas Bachelor', value: 'canvas_bachelor' },
+  { label: 'Canvas Masters', value: 'canvas_masters' },
+]
+
+async function refreshAssessmentConfig() {
+  const res: any = await $fetch('/api/admin/canvas/assessment-config')
+  assessmentCourseRows.value = res?.data?.courses || []
+  assessmentExaminers.value = res?.data?.examiners || []
+  assessmentExaminerScopes.value = res?.data?.examinerScopes || []
+  syncAssessmentCourseState()
+}
+
+async function loadAssessmentAssignments() {
+  assessmentAssignments.value = []
+  if (!assessmentCourseId.value || !assessmentCourseEnabled.value) return
+  assessmentAssignmentsLoading.value = true
+  try {
+    const res: any = await $fetch('/api/admin/canvas/assessment-assignments', {
+      query: { scope: assessmentScope.value, courseId: assessmentCourseId.value },
+    })
+    assessmentAssignments.value = res?.data?.assignments || []
+  } catch (err: any) {
+    showError('Could not load assignments', err?.data?.statusMessage || err.message)
+  } finally {
+    assessmentAssignmentsLoading.value = false
+  }
+}
+
+async function saveAssessmentCourse(enabled: boolean) {
+  if (!assessmentCourseId.value) return
+  assessmentSaveBusy.value = 'course'
+  try {
+    await $fetch('/api/admin/canvas/assessment-course', {
+      method: 'POST',
+      body: { scope: assessmentScope.value, canvasCourseId: assessmentCourseId.value, enabled },
+    })
+    await refreshAssessmentConfig()
+    if (enabled) await loadAssessmentAssignments()
+    else assessmentAssignments.value = []
+    showSuccess('Course configuration saved', enabled ? 'Course enabled for this assessment scope.' : 'Course removed from this assessment scope.')
+  } catch (err: any) {
+    showError('Could not save course configuration', err?.data?.statusMessage || err.message)
+    assessmentCourseEnabled.value = !enabled
+  } finally {
+    assessmentSaveBusy.value = null
+  }
+}
+
+async function saveAssessmentAssignment(assignment: any, selected: boolean) {
+  if (!assessmentCourseId.value) return
+  assessmentSaveBusy.value = `assignment:${assignment.id}`
+  try {
+    await $fetch('/api/admin/canvas/assessment-assignment', {
+      method: 'POST',
+      body: {
+        scope: assessmentScope.value,
+        canvasCourseId: assessmentCourseId.value,
+        canvasAssignmentId: assignment.id,
+        isAssessment: selected,
+      },
+    })
+    assignment.isAssessment = selected
+  } catch (err: any) {
+    showError('Could not save assignment selection', err?.data?.statusMessage || err.message)
+  } finally {
+    assessmentSaveBusy.value = null
+  }
+}
+
+function examinerHasScope(examinerId: string) {
+  return assessmentExaminerScopes.value.some((row: any) =>
+    row.examiner_id === examinerId && row.scope === assessmentScope.value
+  )
+}
+
+async function saveExaminerScope(examinerId: string, assigned: boolean) {
+  assessmentSaveBusy.value = `examiner:${examinerId}`
+  try {
+    await $fetch('/api/admin/canvas/assessment-examiner', {
+      method: 'POST',
+      body: { examinerId, scope: assessmentScope.value, assigned },
+    })
+    await refreshAssessmentConfig()
+  } catch (err: any) {
+    showError('Could not update Examiner access', err?.data?.statusMessage || err.message)
+  } finally {
+    assessmentSaveBusy.value = null
+  }
+}
+
+watch(assessmentScope, () => {
+  syncAssessmentCourseState()
+  loadAssessmentAssignments()
+})
+watch(assessmentCourseId, () => {
+  syncAssessmentCourseState()
+  loadAssessmentAssignments()
+})
 const competencyStudents = ref<any[]>([])
 const totalCompetencies = ref(0)
 const competencyLoading = ref(false)
@@ -114,7 +263,10 @@ watch(selectedCourseId, () => {
   syncNow()
 })
 
-onMounted(fetchCourses)
+onMounted(async () => {
+  await fetchCourses()
+  await fetchAssessmentConfig()
+})
 
 function toggleSort(key: string) {
   if (sortKey.value === key) {
@@ -261,10 +413,17 @@ function groupBadgeColor(mastered: number, total: number) {
         >
           Competency Matrix
         </button>
+        <button
+          class="px-3 py-1.5 text-sm rounded-md transition-colors"
+          :class="activeTab === 'assessment' ? 'bg-inverted text-inverted font-medium' : 'text-muted hover:text-highlighted'"
+          @click="activeTab = 'assessment'"
+        >
+          Assessment Setup
+        </button>
       </div>
 
       <!-- Empty state: no course chosen yet -->
-      <div v-if="!selectedCourseId" class="text-center py-16">
+      <div v-if="!selectedCourseId && activeTab !== 'assessment'" class="text-center py-16">
         <UIcon name="i-lucide-bar-chart-3" class="size-10 text-muted mx-auto mb-3" />
         <p class="font-medium text-highlighted">Select a Course to Begin</p>
         <p class="text-sm text-muted mt-1">
@@ -275,7 +434,7 @@ function groupBadgeColor(mastered: number, total: number) {
 
       <template v-else>
           <!-- Summary stat cards -->
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+          <div v-if="activeTab !== 'assessment'" class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
             <UCard>
               <p class="text-xs text-muted uppercase tracking-wide">Students</p>
               <p class="text-2xl font-semibold">{{ summary.studentCount }}</p>
@@ -357,7 +516,7 @@ function groupBadgeColor(mastered: number, total: number) {
         </template>
 
         <!-- ═══ Competency Matrix tab ═══ -->
-        <template v-else>
+        <template v-else-if="activeTab === 'matrix'">
           <UCard variant="subtle" class="mb-4" :ui="{ body: '!py-3' }">
             <p class="font-medium text-highlighted text-sm">Competency Matrix</p>
             <p class="text-xs text-muted mt-0.5">
@@ -443,6 +602,121 @@ function groupBadgeColor(mastered: number, total: number) {
               </div>
             </div>
           </div>
+        </template>
+
+        <!-- ═══ Assessment Setup tab ═══ -->
+        <template v-else>
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <UCard>
+              <div class="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <h3 class="font-semibold text-highlighted">Assessment course selection</h3>
+                  <p class="text-xs text-muted mt-1">
+                    Discoverable Canvas courses are not automatically classified. Enable only the courses that belong in this scope.
+                  </p>
+                </div>
+                <UBadge color="info" variant="subtle">Explicit selection</UBadge>
+              </div>
+
+              <div class="space-y-3">
+                <div>
+                  <label class="text-xs text-muted mb-1.5 block">Assessment scope</label>
+                  <USelectMenu v-model="assessmentScope" :items="assessmentScopeItems" value-key="value" class="w-full" />
+                </div>
+                <div>
+                  <label class="text-xs text-muted mb-1.5 block">Canvas course ({{ courses.length }} discovered)</label>
+                  <USelectMenu
+                    v-model="assessmentCourseId"
+                    :items="assessmentCourseItems"
+                    value-key="value"
+                    searchable
+                    placeholder="Search and select a Canvas course"
+                    :loading="coursesLoading || assessmentConfigLoading"
+                    class="w-full"
+                  />
+                </div>
+
+                <div v-if="assessmentCourseId" class="flex items-center justify-between rounded-lg border border-default p-3">
+                  <div>
+                    <p class="text-sm font-medium text-highlighted">Include course in {{ assessmentScope === 'canvas_bachelor' ? 'Canvas Bachelor' : 'Canvas Masters' }}</p>
+                    <p class="text-xs text-muted">Disabling a course hides its assignments from the grading workflow.</p>
+                  </div>
+                  <USwitch
+                    :model-value="assessmentCourseEnabled"
+                    :disabled="assessmentSaveBusy === 'course'"
+                    @update:model-value="saveAssessmentCourse"
+                  />
+                </div>
+              </div>
+            </UCard>
+
+            <UCard>
+              <h3 class="font-semibold text-highlighted">Examiner scope access</h3>
+              <p class="text-xs text-muted mt-1 mb-3">
+                Assign active teaching Examiners to this scope. This does not grant access to Final Project assignments.
+              </p>
+              <div v-if="assessmentConfigLoading" class="text-sm text-muted py-4">Loading Examiners…</div>
+              <div v-else-if="assessmentExaminers.length === 0" class="text-sm text-muted py-4">
+                No active Examiners found.
+              </div>
+              <div v-else class="divide-y divide-default">
+                <div v-for="examiner in assessmentExaminers" :key="examiner.id" class="flex items-center justify-between gap-3 py-2.5">
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium text-highlighted">{{ examiner.name || examiner.email }}</p>
+                    <p class="text-xs text-muted truncate">{{ examiner.email }}</p>
+                  </div>
+                  <USwitch
+                    :model-value="examinerHasScope(examiner.id)"
+                    :disabled="assessmentSaveBusy === `examiner:${examiner.id}`"
+                    @update:model-value="saveExaminerScope(examiner.id, $event)"
+                  />
+                </div>
+              </div>
+            </UCard>
+          </div>
+
+          <UCard class="mt-4">
+            <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+              <div>
+                <h3 class="font-semibold text-highlighted">Assessment assignment selection</h3>
+                <p class="text-xs text-muted mt-1">
+                  Assignments are not graded by AI unless explicitly selected. New assignments default to off.
+                </p>
+              </div>
+              <UBadge color="neutral" variant="subtle">
+                {{ selectedAssessmentAssignmentCount }} selected
+              </UBadge>
+            </div>
+
+            <div v-if="!assessmentCourseId" class="text-sm text-muted py-8 text-center">
+              Select a course above to configure its assignments.
+            </div>
+            <div v-else-if="!assessmentCourseEnabled" class="text-sm text-muted py-8 text-center">
+              Enable this course in the selected scope before choosing assessment assignments.
+            </div>
+            <div v-else-if="assessmentAssignmentsLoading" class="text-sm text-muted py-8 text-center">
+              Loading assignments from Canvas…
+            </div>
+            <div v-else-if="assessmentAssignments.length === 0" class="text-sm text-muted py-8 text-center">
+              No assignments were found for this course.
+            </div>
+            <div v-else class="divide-y divide-default">
+              <div v-for="assignment in assessmentAssignments" :key="assignment.id" class="flex items-center justify-between gap-3 py-3">
+                <div class="min-w-0">
+                  <p class="text-sm font-medium text-highlighted">{{ assignment.name }}</p>
+                  <p class="text-xs text-muted">
+                    ID {{ assignment.id }} · {{ assignment.pointsPossible ?? '—' }} points
+                    <span v-if="assignment.dueAt"> · Due {{ formatDate(assignment.dueAt) }}</span>
+                  </p>
+                </div>
+                <USwitch
+                  :model-value="assignment.isAssessment"
+                  :disabled="assessmentSaveBusy === `assignment:${assignment.id}`"
+                  @update:model-value="saveAssessmentAssignment(assignment, $event)"
+                />
+              </div>
+            </div>
+          </UCard>
         </template>
       </template>
     </template>
